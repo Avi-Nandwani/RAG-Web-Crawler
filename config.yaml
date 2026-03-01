@@ -1,0 +1,63 @@
+# RAG Web Crawler Configuration
+
+# Crawler Settings
+crawler:
+  max_pages: 30                    # Maximum number of pages to crawl
+  max_depth: 3                     # Maximum crawl depth from starting URL
+  crawl_delay_ms: 500             # Delay between requests in milliseconds
+  timeout_seconds: 10              # Request timeout
+  user_agent: "RAG-Web-Crawler/1.0 (Educational Project)"
+  respect_robots_txt: true
+  max_retries: 3
+  
+# Text Processing Settings
+chunking:
+  chunk_size: 1000                 # Characters per chunk
+  chunk_overlap: 200               # Overlap between chunks in characters
+  min_chunk_size: 100              # Minimum chunk size to keep
+  
+# Embedding Settings
+embeddings:
+  model_name: "all-MiniLM-L6-v2"  # sentence-transformers model
+  batch_size: 32                   # Batch size for embedding generation
+  device: "cpu"                    # cpu or cuda
+  
+# Vector Store Settings
+vectorstore:
+  collection_name: "web_documents"
+  persist_directory: "./data/chroma_db"
+  distance_metric: "cosine"        # cosine, l2, or ip (inner product)
+  
+# Retrieval Settings
+retrieval:
+  top_k: 5                         # Number of chunks to retrieve
+  similarity_threshold: 0.3        # Minimum similarity score (0-1)
+  
+# LLM Settings
+llm:
+  model_name: "llama3.2:3b"       # Ollama model name
+  base_url: "http://localhost:11434"
+  temperature: 0.1                 # Lower = more focused, higher = more creative
+  max_tokens: 512                  # Maximum tokens in response
+  timeout_seconds: 30
+  
+# API Settings
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  log_level: "info"
+  
+# Storage Paths
+paths:
+  raw_data: "./data/raw"
+  processed_data: "./data/processed"
+  vector_db: "./data/chroma_db"
+  logs: "./logs"
+  
+# Logging
+logging:
+  level: "INFO"                    # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan> - <level>{message}</level>"
+  rotation: "10 MB"
+  retention: "1 week"
