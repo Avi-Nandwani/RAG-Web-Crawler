@@ -72,3 +72,6 @@ models/
 *.tmp
 *.bak
 *.cache
+
+# Private development notes
+DEVELOPMENT_PLAN.md
