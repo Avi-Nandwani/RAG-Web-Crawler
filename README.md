@@ -254,24 +254,6 @@ flake8 src/ tests/
 - **Simple chunking**: Character-based vs semantic, easier to implement and tune
 - **No JavaScript rendering**: Simplifies crawler, covers 80% of content
 
-## Roadmap
-
-### Week 1-8 (Midterm) ✅
-- [x] Project scaffolding
-- [ ] Basic web crawler
-- [ ] Text extraction and chunking
-- [ ] Vector storage
-- [ ] Simple Q&A
-
-### Week 9-16 (Final)
-- [ ] Grounding and refusals
-- [ ] Observability and metrics
-- [ ] Source highlighting
-- [ ] Error handling
-- [ ] Performance optimization
-- [ ] Evaluation suite
-- [ ] Demo interface
-
 ## Troubleshooting
 
 **Ollama not running**
@@ -298,11 +280,11 @@ pip install -r requirements.txt --upgrade
 
 ## License
 
-This is an educational project for university submission.
+MIT License
 
 ## Author
 
-Student Final Year Project - 2026
+Avi Nandwani
 
 ## Acknowledgments
 
