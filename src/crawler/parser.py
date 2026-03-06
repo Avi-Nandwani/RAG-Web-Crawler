@@ -1,9 +1,3 @@
-"""
-HTML parser: extracts title, clean body text, and internal links.
-Strips boilerplate (scripts, styles, nav, header, footer) before
-returning text so downstream chunking gets clean content only.
-"""
-
 from typing import List, Optional
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse

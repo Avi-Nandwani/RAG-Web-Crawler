@@ -1,15 +1,3 @@
-"""
-Unit tests for Week 2 — Web Crawler module.
-
-All network calls are mocked so tests run offline.
-
-Test coverage:
-  - RobotsCache: allow / disallow / network failure
-  - Fetcher: success, HTTP error, non-HTML content type, retry logic
-  - HTMLParser: title extraction, text cleaning, link extraction, domain filtering
-  - WebCrawler: domain boundary, max_pages limit, robots.txt gate, raw HTML saved
-"""
-
 import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock

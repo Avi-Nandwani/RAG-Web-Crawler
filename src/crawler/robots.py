@@ -1,8 +1,3 @@
-"""
-Robots.txt parser with per-domain caching.
-Uses Python stdlib urllib.robotparser — no extra dependencies.
-"""
-
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from typing import Dict, Optional

@@ -1,9 +1,3 @@
-"""
-WebCrawler: BFS-based crawler with robots.txt compliance,
-domain-boundary enforcement, configurable rate limiting,
-and raw HTML persistence.
-"""
-
 import time
 import hashlib
 from collections import deque
