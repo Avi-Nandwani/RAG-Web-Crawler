@@ -1,9 +1,3 @@
-"""
-HTTP fetcher with retry logic, configurable timeout, and user-agent injection.
-Returns a structured result dict rather than raising exceptions so the
-caller can decide how to handle failures.
-"""
-
 import time
 from typing import Optional
 from dataclasses import dataclass, field
