@@ -41,9 +41,9 @@ class TextChunker:
         min_chunk_size: Optional[int] = None,
     ):
         chunking_cfg = config.get("chunking", {})
-        self.chunk_size: int = chunk_size or chunking_cfg.get("chunk_size", 1000)
-        self.chunk_overlap: int = chunk_overlap or chunking_cfg.get("chunk_overlap", 200)
-        self.min_chunk_size: int = min_chunk_size or chunking_cfg.get("min_chunk_size", 100)
+        self.chunk_size: int = chunk_size if chunk_size is not None else chunking_cfg.get("chunk_size", 1000)
+        self.chunk_overlap: int = chunk_overlap if chunk_overlap is not None else chunking_cfg.get("chunk_overlap", 200)
+        self.min_chunk_size: int = min_chunk_size if min_chunk_size is not None else chunking_cfg.get("min_chunk_size", 100)
 
         if self.chunk_overlap >= self.chunk_size:
             raise ValueError("chunk_overlap must be smaller than chunk_size")
