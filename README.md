@@ -197,9 +197,16 @@ curl -X POST "http://localhost:8000/ask" \
 }
 ```
 
-### Using CLI (Coming Soon)
+### Demo Script (Week 8)
 
-Command-line interface will be added in Week 7.
+Run the full demo flow (`health -> crawl -> index -> ask`) against a running API server:
+
+```bash
+python scripts/demo_pipeline.py \
+  --base-url http://127.0.0.1:8000 \
+  --start-url https://example.com \
+  --question "What is the purpose of this site?"
+```
 
 ## Configuration
 
@@ -218,6 +225,9 @@ All configuration is managed through [config.yaml](config.yaml). Key settings:
 ```bash
 # Run all tests
 pytest tests/ -v
+
+# Run Week 8 end-to-end pipeline test
+pytest tests/test_e2e_pipeline.py -v
 
 # Run with coverage
 pytest tests/ --cov=src --cov-report=html
