@@ -36,6 +36,10 @@ class DummyCleaner:
 
 
 class DummyEmbedder:
+    def __init__(self):
+        self.model_name = "all-MiniLM-L6-v2"
+        self._model = object()
+
     def embed(self, texts: List[str]):
         return [[0.1, 0.2, 0.3] for _ in texts]
 
@@ -140,6 +144,30 @@ class TestAPI:
         assert body["indexed_pages"] == 2
         assert body["indexed_chunks"] >= 2
         assert body["vector_count"] >= 2
+
+    def test_index_embedding_model_override(self):
+        self.app.state.last_crawl_result = make_crawl_result()
+        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
+
+        embedder = DummyEmbedder()
+        self.app.dependency_overrides[get_embedder] = lambda: embedder
+
+        store = DummyVectorStore()
+        self.app.dependency_overrides[get_vectorstore] = lambda: store
+
+        resp = self.client.post(
+            "/index",
+            json={
+                "embedding_model": "all-mpnet-base-v2",
+                "chunk_size": 120,
+                "chunk_overlap": 20,
+                "min_chunk_size": 20,
+            },
+        )
+
+        assert resp.status_code == 200
+        assert embedder.model_name == "all-mpnet-base-v2"
+        assert embedder._model is None
 
     def test_ask_endpoint(self):
         qa = DummyQAService()

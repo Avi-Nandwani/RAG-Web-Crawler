@@ -142,6 +142,14 @@ def create_app() -> FastAPI:
             min_chunk_size=payload.min_chunk_size,
         )
 
+        # Optional per-request embedding model override.
+        # If the embedder is already instantiated, reset lazy-loaded model
+        # so the new model name is applied on the next embed() call.
+        if payload.embedding_model:
+            embedder.model_name = payload.embedding_model
+            if hasattr(embedder, "_model"):
+                embedder._model = None
+
         processed_dir = Path(config.get("paths.processed_data", "./data/processed"))
         processed_dir.mkdir(parents=True, exist_ok=True)
 
