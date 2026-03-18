@@ -136,10 +136,45 @@ def create_app() -> FastAPI:
                 content={"detail": "No crawled pages available. Call /crawl first."},
             )
 
+        chunking_cfg = config.get("chunking", {})
+        effective_chunk_size = payload.chunk_size if payload.chunk_size is not None else chunking_cfg.get("chunk_size", 1000)
+        effective_chunk_overlap = (
+            payload.chunk_overlap if payload.chunk_overlap is not None else chunking_cfg.get("chunk_overlap", 200)
+        )
+        effective_min_chunk_size = (
+            payload.min_chunk_size if payload.min_chunk_size is not None else chunking_cfg.get("min_chunk_size", 100)
+        )
+
+        if effective_chunk_overlap >= effective_chunk_size:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": "Invalid chunking configuration: chunk_overlap must be smaller than chunk_size.",
+                    "values": {
+                        "chunk_size": effective_chunk_size,
+                        "chunk_overlap": effective_chunk_overlap,
+                        "min_chunk_size": effective_min_chunk_size,
+                    },
+                },
+            )
+
+        if effective_min_chunk_size > effective_chunk_size:
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": "Invalid chunking configuration: min_chunk_size must be less than or equal to chunk_size.",
+                    "values": {
+                        "chunk_size": effective_chunk_size,
+                        "chunk_overlap": effective_chunk_overlap,
+                        "min_chunk_size": effective_min_chunk_size,
+                    },
+                },
+            )
+
         chunker = TextChunker(
-            chunk_size=payload.chunk_size,
-            chunk_overlap=payload.chunk_overlap,
-            min_chunk_size=payload.min_chunk_size,
+            chunk_size=effective_chunk_size,
+            chunk_overlap=effective_chunk_overlap,
+            min_chunk_size=effective_min_chunk_size,
         )
 
         # Optional per-request embedding model override.

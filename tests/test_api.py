@@ -169,6 +169,40 @@ class TestAPI:
         assert embedder.model_name == "all-mpnet-base-v2"
         assert embedder._model is None
 
+    def test_index_with_empty_payload_uses_config_defaults(self):
+        self.app.state.last_crawl_result = make_crawl_result()
+        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
+        self.app.dependency_overrides[get_embedder] = lambda: DummyEmbedder()
+        store = DummyVectorStore()
+        self.app.dependency_overrides[get_vectorstore] = lambda: store
+
+        resp = self.client.post("/index", json={})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["indexed_pages"] == 2
+        assert body["indexed_chunks"] >= 1
+
+    def test_index_rejects_invalid_chunking_configuration(self):
+        self.app.state.last_crawl_result = make_crawl_result()
+        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
+        self.app.dependency_overrides[get_embedder] = lambda: DummyEmbedder()
+        store = DummyVectorStore()
+        self.app.dependency_overrides[get_vectorstore] = lambda: store
+
+        resp = self.client.post(
+            "/index",
+            json={
+                "chunk_size": 100,
+                "chunk_overlap": 120,
+                "min_chunk_size": 50,
+            },
+        )
+
+        assert resp.status_code == 422
+        body = resp.json()
+        assert "chunk_overlap" in body["detail"]
+
     def test_ask_endpoint(self):
         qa = DummyQAService()
         self.app.dependency_overrides[get_qa_service] = lambda: qa
