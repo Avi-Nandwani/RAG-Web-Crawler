@@ -14,6 +14,8 @@ class QAResult:
     answer: str
     sources: List[Dict[str, Any]] = field(default_factory=list)
     used_context_chunks: int = 0
+    confidence_score: float = 0.0
+    similarity_threshold: float = 0.0
     refused: bool = False
     reason: str = ""
 
@@ -51,22 +53,43 @@ class GroundedQAService:
                 answer=REFUSAL_MESSAGE,
                 sources=[],
                 used_context_chunks=0,
+                confidence_score=0.0,
+                similarity_threshold=self.retriever.get_effective_threshold(similarity_threshold),
                 refused=True,
                 reason="empty_question",
             )
 
+        threshold = self.retriever.get_effective_threshold(similarity_threshold)
+
         retrieved = self.retriever.retrieve(
             query=question,
             top_k=top_k,
-            similarity_threshold=similarity_threshold,
+            similarity_threshold=threshold,
+            enforce_threshold=False,
         )
         if not retrieved:
             return QAResult(
                 answer=REFUSAL_MESSAGE,
                 sources=[],
                 used_context_chunks=0,
+                confidence_score=0.0,
+                similarity_threshold=threshold,
                 refused=True,
                 reason="no_context",
+            )
+
+        confidence = self.retriever.confidence_score(retrieved)
+        top_similarity = max(item.similarity_score for item in retrieved)
+
+        if top_similarity < threshold:
+            return QAResult(
+                answer=REFUSAL_MESSAGE,
+                sources=self.retriever.build_sources(retrieved),
+                used_context_chunks=len(retrieved),
+                confidence_score=confidence,
+                similarity_threshold=threshold,
+                refused=True,
+                reason="below_similarity_threshold",
             )
 
         context = self.retriever.format_context(retrieved)
@@ -84,6 +107,8 @@ class GroundedQAService:
                 answer=REFUSAL_MESSAGE,
                 sources=self.retriever.build_sources(retrieved),
                 used_context_chunks=len(retrieved),
+                confidence_score=confidence,
+                similarity_threshold=threshold,
                 refused=True,
                 reason="llm_error",
             )
@@ -93,6 +118,8 @@ class GroundedQAService:
                 answer=REFUSAL_MESSAGE,
                 sources=self.retriever.build_sources(retrieved),
                 used_context_chunks=len(retrieved),
+                confidence_score=confidence,
+                similarity_threshold=threshold,
                 refused=True,
                 reason="empty_llm_output",
             )
@@ -104,6 +131,8 @@ class GroundedQAService:
             answer=answer,
             sources=sources,
             used_context_chunks=len(retrieved),
+            confidence_score=confidence,
+            similarity_threshold=threshold,
             refused=False,
             reason="",
         )

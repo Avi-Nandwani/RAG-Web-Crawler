@@ -19,6 +19,8 @@ This project implements a complete RAG pipeline that:
 - ✅ Semantic chunking with overlap for context preservation
 - ✅ Vector-based similarity search using ChromaDB
 - ✅ Grounded question answering with source citations
+- ✅ Confidence scoring for retrieved evidence
+- ✅ Hard refusal when retrieval confidence is below threshold
 - ✅ RESTful API with FastAPI
 - ✅ Comprehensive logging and error handling
 - ✅ Completely free and offline-capable
@@ -182,6 +184,10 @@ curl -X POST "http://localhost:8000/ask" \
 ```json
 {
   "answer": "Based on the crawled content, this website...",
+  "refused": false,
+  "reason": "",
+  "confidence_score": 0.84,
+  "similarity_threshold": 0.3,
   "sources": [
     {
       "url": "https://example.com/about",

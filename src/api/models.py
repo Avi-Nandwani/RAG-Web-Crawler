@@ -51,6 +51,8 @@ class AskResponse(BaseModel):
     answer: str
     refused: bool
     reason: str
+    confidence_score: float
+    similarity_threshold: float
     sources: List[SourceItem]
     timings: Dict[str, Any]
 

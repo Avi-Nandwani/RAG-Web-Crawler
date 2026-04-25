@@ -51,6 +51,16 @@ class TestRetriever:
         assert kwargs["top_k"] == 7
         assert kwargs["similarity_threshold"] == 0.55
 
+    def test_non_enforced_threshold_queries_with_zero_cutoff(self):
+        retriever, mock_embedder, mock_store = self._build_retriever()
+        mock_embedder.embed_one.return_value = [0.1, 0.2]
+        mock_store.search.return_value = []
+
+        retriever.retrieve("query", similarity_threshold=0.7, enforce_threshold=False)
+
+        kwargs = mock_store.search.call_args.kwargs
+        assert kwargs["similarity_threshold"] == 0.0
+
     def test_results_are_sorted_descending(self):
         retriever, mock_embedder, mock_store = self._build_retriever()
         mock_embedder.embed_one.return_value = [0.1]
@@ -141,3 +151,30 @@ class TestRetriever:
         assert sources[0]["chunk_index"] == 2
         assert sources[0]["similarity_score"] == 0.88
         assert len(sources[0]["snippet"]) == 220
+
+    def test_confidence_score_range(self):
+        retriever, _, _ = self._build_retriever()
+        results = [
+            RetrievedChunk(
+                text="Chunk one",
+                url="https://example.com/1",
+                title="Page One",
+                chunk_index=0,
+                similarity_score=0.9,
+                metadata={},
+            ),
+            RetrievedChunk(
+                text="Chunk two",
+                url="https://example.com/2",
+                title="Page Two",
+                chunk_index=1,
+                similarity_score=0.7,
+                metadata={},
+            ),
+        ]
+
+        score = retriever.confidence_score(results)
+
+        assert score >= 0.0
+        assert score <= 1.0
+        assert score > 0.0

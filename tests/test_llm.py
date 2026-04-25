@@ -79,6 +79,7 @@ class TestGroundedQAService:
     def test_no_context_refuses(self):
         service, mock_retriever, mock_llm = self._service()
         mock_retriever.retrieve.return_value = []
+        mock_retriever.get_effective_threshold.return_value = 0.3
 
         result = service.ask("What is RAG?")
 
@@ -90,6 +91,8 @@ class TestGroundedQAService:
     def test_llm_error_refuses_with_sources(self):
         service, mock_retriever, mock_llm = self._service()
         retrieved = [self._chunk()]
+        mock_retriever.get_effective_threshold.return_value = 0.3
+        mock_retriever.confidence_score.return_value = 0.78
         mock_retriever.retrieve.return_value = retrieved
         mock_retriever.format_context.return_value = "[1] RAG Basics ..."
         mock_retriever.build_sources.return_value = [{"url": "https://example.com/rag"}]
@@ -104,6 +107,8 @@ class TestGroundedQAService:
     def test_empty_llm_output_refuses(self):
         service, mock_retriever, mock_llm = self._service()
         retrieved = [self._chunk()]
+        mock_retriever.get_effective_threshold.return_value = 0.3
+        mock_retriever.confidence_score.return_value = 0.78
         mock_retriever.retrieve.return_value = retrieved
         mock_retriever.format_context.return_value = "context"
         mock_retriever.build_sources.return_value = [{"url": "https://example.com/rag"}]
@@ -117,6 +122,8 @@ class TestGroundedQAService:
     def test_success_returns_answer_and_sources(self):
         service, mock_retriever, mock_llm = self._service()
         retrieved = [self._chunk()]
+        mock_retriever.get_effective_threshold.return_value = 0.3
+        mock_retriever.confidence_score.return_value = 0.82
         mock_retriever.retrieve.return_value = retrieved
         mock_retriever.format_context.return_value = "context"
         mock_retriever.build_sources.return_value = [
@@ -130,10 +137,14 @@ class TestGroundedQAService:
         assert "RAG is retrieval" in result.answer
         assert len(result.sources) == 1
         assert result.used_context_chunks == 1
+        assert result.confidence_score == 0.82
+        assert result.similarity_threshold == 0.3
 
     def test_appends_source_footer_if_model_misses_citations(self):
         service, mock_retriever, mock_llm = self._service()
         retrieved = [self._chunk()]
+        mock_retriever.get_effective_threshold.return_value = 0.3
+        mock_retriever.confidence_score.return_value = 0.82
         mock_retriever.retrieve.return_value = retrieved
         mock_retriever.format_context.return_value = "context"
         mock_retriever.build_sources.return_value = [
@@ -146,3 +157,20 @@ class TestGroundedQAService:
         assert result.refused is False
         assert "Sources:" in result.answer
         assert "[1] RAG Basics (https://example.com/rag)" in result.answer
+
+    def test_below_similarity_threshold_refuses_hard(self):
+        service, mock_retriever, mock_llm = self._service()
+        retrieved = [self._chunk(score=0.2)]
+        mock_retriever.get_effective_threshold.return_value = 0.5
+        mock_retriever.confidence_score.return_value = 0.24
+        mock_retriever.retrieve.return_value = retrieved
+        mock_retriever.build_sources.return_value = [{"url": "https://example.com/rag"}]
+
+        result = service.ask("What is RAG?", similarity_threshold=0.5)
+
+        assert result.refused is True
+        assert result.reason == "below_similarity_threshold"
+        assert result.answer == REFUSAL_MESSAGE
+        assert result.confidence_score == 0.24
+        assert result.similarity_threshold == 0.5
+        mock_llm.generate.assert_not_called()

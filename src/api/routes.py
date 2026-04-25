@@ -29,10 +29,6 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-# ------------------------------------------------------------------
-# Dependency providers
-# ------------------------------------------------------------------
-
 def get_crawler() -> WebCrawler:
     return WebCrawler()
 
@@ -52,10 +48,6 @@ def get_vectorstore() -> VectorStore:
 def get_qa_service() -> GroundedQAService:
     return GroundedQAService()
 
-
-# ------------------------------------------------------------------
-# App factory
-# ------------------------------------------------------------------
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -248,6 +240,8 @@ def create_app() -> FastAPI:
             answer=result.answer,
             refused=result.refused,
             reason=result.reason,
+            confidence_score=getattr(result, "confidence_score", 0.0),
+            similarity_threshold=getattr(result, "similarity_threshold", 0.0),
             sources=result.sources,
             timings={
                 "retrieval_ms": None,
