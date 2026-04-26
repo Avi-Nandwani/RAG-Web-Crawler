@@ -178,3 +178,45 @@ class TestRetriever:
         assert score >= 0.0
         assert score <= 1.0
         assert score > 0.0
+
+    def test_build_sources_adds_highlighted_snippet_for_query(self):
+        retriever, _, _ = self._build_retriever()
+        text = "This page explains project goals, scope, and timelines for implementation."
+        results = [
+            RetrievedChunk(
+                text=text,
+                url="https://example.com/source",
+                title="Source",
+                chunk_index=0,
+                similarity_score=0.91,
+                metadata={},
+            )
+        ]
+
+        sources = retriever.build_sources(results, query="What are the project goals?")
+
+        assert len(sources) == 1
+        assert sources[0]["exact_snippet"]
+        assert "<<" in sources[0]["highlighted_snippet"]
+        assert ">>" in sources[0]["highlighted_snippet"]
+        assert isinstance(sources[0]["relevance_span"], dict)
+
+    def test_build_sources_without_query_keeps_plain_snippet(self):
+        retriever, _, _ = self._build_retriever()
+        results = [
+            RetrievedChunk(
+                text="B" * 300,
+                url="https://example.com/plain",
+                title="Plain",
+                chunk_index=1,
+                similarity_score=0.71,
+                metadata={},
+            )
+        ]
+
+        sources = retriever.build_sources(results)
+
+        assert len(sources) == 1
+        assert len(sources[0]["exact_snippet"]) == 220
+        assert sources[0]["exact_snippet"] == sources[0]["highlighted_snippet"]
+        assert sources[0]["relevance_span"] is None

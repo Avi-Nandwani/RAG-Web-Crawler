@@ -45,6 +45,9 @@ class SourceItem(BaseModel):
     chunk_index: Optional[int] = 0
     similarity_score: Optional[float] = 0.0
     snippet: Optional[str] = ""
+    exact_snippet: Optional[str] = ""
+    highlighted_snippet: Optional[str] = ""
+    relevance_span: Optional[Dict[str, int]] = None
 
 
 class AskResponse(BaseModel):

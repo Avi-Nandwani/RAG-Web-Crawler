@@ -174,3 +174,20 @@ class TestGroundedQAService:
         assert result.confidence_score == 0.24
         assert result.similarity_threshold == 0.5
         mock_llm.generate.assert_not_called()
+
+    def test_passes_question_for_source_highlighting(self):
+        service, mock_retriever, mock_llm = self._service()
+        question = "What are the project goals?"
+        retrieved = [self._chunk(score=0.82)]
+
+        mock_retriever.get_effective_threshold.return_value = 0.3
+        mock_retriever.confidence_score.return_value = 0.8
+        mock_retriever.retrieve.return_value = retrieved
+        mock_retriever.format_context.return_value = "context"
+        mock_retriever.build_sources.return_value = [{"url": "https://example.com/rag"}]
+        mock_llm.generate.return_value = MagicMock(text="Answer [1]")
+
+        result = service.ask(question)
+
+        assert result.refused is False
+        mock_retriever.build_sources.assert_called_with(retrieved, query=question)

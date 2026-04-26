@@ -66,7 +66,16 @@ class DummyQAService:
     def __init__(self, result: QAResult = None):
         self.result = result or QAResult(
             answer="RAG uses retrieval plus generation [1].",
-            sources=[{"url": "https://example.com/rag", "title": "RAG", "chunk_index": 0, "similarity_score": 0.9, "snippet": "RAG uses retrieval..."}],
+            sources=[{
+                "url": "https://example.com/rag",
+                "title": "RAG",
+                "chunk_index": 0,
+                "similarity_score": 0.9,
+                "snippet": "RAG uses retrieval...",
+                "exact_snippet": "RAG uses retrieval...",
+                "highlighted_snippet": "RAG uses <<retrieval>>...",
+                "relevance_span": {"start": 9, "end": 18},
+            }],
             used_context_chunks=1,
             refused=False,
             reason="",

@@ -84,7 +84,7 @@ class GroundedQAService:
         if top_similarity < threshold:
             return QAResult(
                 answer=REFUSAL_MESSAGE,
-                sources=self.retriever.build_sources(retrieved),
+                sources=self.retriever.build_sources(retrieved, query=question),
                 used_context_chunks=len(retrieved),
                 confidence_score=confidence,
                 similarity_threshold=threshold,
@@ -105,7 +105,7 @@ class GroundedQAService:
             logger.error(f"LLM call failed: {exc}")
             return QAResult(
                 answer=REFUSAL_MESSAGE,
-                sources=self.retriever.build_sources(retrieved),
+                sources=self.retriever.build_sources(retrieved, query=question),
                 used_context_chunks=len(retrieved),
                 confidence_score=confidence,
                 similarity_threshold=threshold,
@@ -116,7 +116,7 @@ class GroundedQAService:
         if not llm_response.text:
             return QAResult(
                 answer=REFUSAL_MESSAGE,
-                sources=self.retriever.build_sources(retrieved),
+                sources=self.retriever.build_sources(retrieved, query=question),
                 used_context_chunks=len(retrieved),
                 confidence_score=confidence,
                 similarity_threshold=threshold,
@@ -124,7 +124,7 @@ class GroundedQAService:
                 reason="empty_llm_output",
             )
 
-        sources = self.retriever.build_sources(retrieved)
+        sources = self.retriever.build_sources(retrieved, query=question)
         answer = self._ensure_citations(llm_response.text, sources)
 
         return QAResult(

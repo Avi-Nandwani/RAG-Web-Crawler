@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import re
 from typing import Any, Dict, List, Optional
 
 from src.rag.embedder import Embedder
@@ -149,19 +150,75 @@ class Retriever:
 
         return "\n".join(lines).strip()
 
-    def build_sources(self, results: List[RetrievedChunk]) -> List[Dict[str, Any]]:
+    def build_sources(self, results: List[RetrievedChunk], query: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Convert retrieved chunks into API-ready source objects.
         """
         sources: List[Dict[str, Any]] = []
         for item in results:
+            exact_snippet, highlighted_snippet, relevance_span = self._extract_relevant_snippet(
+                text=item.text,
+                query=query,
+            )
             sources.append(
                 {
                     "url": item.url,
                     "title": item.title,
                     "chunk_index": item.chunk_index,
                     "similarity_score": item.similarity_score,
-                    "snippet": item.text[:220],
+                    "snippet": exact_snippet,
+                    "exact_snippet": exact_snippet,
+                    "highlighted_snippet": highlighted_snippet,
+                    "relevance_span": relevance_span,
                 }
             )
         return sources
+
+    def _extract_relevant_snippet(self, text: str, query: Optional[str], max_len: int = 220):
+        """
+        Return an exact snippet from text centered on the best query-term match,
+        plus a highlighted variant and [start, end) offsets within the snippet.
+        """
+        if not text:
+            return "", "", None
+
+        match_start = None
+        match_term = ""
+        lower_text = text.lower()
+
+        for term in self._query_terms(query):
+            idx = lower_text.find(term)
+            if idx != -1 and (match_start is None or idx < match_start):
+                match_start = idx
+                match_term = term
+
+        if match_start is None:
+            snippet = text[:max_len]
+            return snippet, snippet, None
+
+        half_window = max_len // 2
+        start = max(0, match_start - half_window)
+        end = min(len(text), start + max_len)
+
+        if end - start < max_len and start > 0:
+            start = max(0, end - max_len)
+
+        snippet = text[start:end]
+        local_start = max(0, match_start - start)
+        local_end = min(len(snippet), local_start + len(match_term))
+
+        highlighted = (
+            snippet[:local_start]
+            + "<<"
+            + snippet[local_start:local_end]
+            + ">>"
+            + snippet[local_end:]
+        )
+
+        return snippet, highlighted, {"start": local_start, "end": local_end}
+
+    def _query_terms(self, query: Optional[str]) -> List[str]:
+        if not query:
+            return []
+        terms = re.findall(r"[a-zA-Z0-9]{3,}", query.lower())
+        return sorted(set(terms), key=len, reverse=True)

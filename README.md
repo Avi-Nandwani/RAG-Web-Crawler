@@ -21,6 +21,7 @@ This project implements a complete RAG pipeline that:
 - ✅ Grounded question answering with source citations
 - ✅ Confidence scoring for retrieved evidence
 - ✅ Hard refusal when retrieval confidence is below threshold
+- ✅ Relevance-centered source snippets with highlighted match spans
 - ✅ RESTful API with FastAPI
 - ✅ Comprehensive logging and error handling
 - ✅ Completely free and offline-capable
@@ -192,6 +193,9 @@ curl -X POST "http://localhost:8000/ask" \
     {
       "url": "https://example.com/about",
       "snippet": "Our mission is to...",
+      "exact_snippet": "Our mission is to build practical AI tools for students...",
+      "highlighted_snippet": "Our mission is to build practical <<AI tools>> for students...",
+      "relevance_span": {"start": 32, "end": 40},
       "similarity_score": 0.85
     }
   ],
