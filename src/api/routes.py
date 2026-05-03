@@ -16,6 +16,7 @@ from src.api.models import (
     HealthResponse,
     IndexRequest,
     IndexResponse,
+    StatsResponse,
 )
 from src.crawler.crawler import CrawlResult, WebCrawler
 from src.llm.qa import GroundedQAService
@@ -56,12 +57,49 @@ def create_app() -> FastAPI:
         description="Week 7 API layer for crawl, index, ask, and health endpoints.",
     )
     app.state.last_crawl_result = None
+    app.state.metrics = {
+        "total_requests": 0,
+        "endpoint_counts": {},
+        "total_latency_ms": 0.0,
+        "crawl_runs": 0,
+        "last_crawl_pages": 0,
+        "last_crawl_failed": 0,
+        "last_crawl_skipped": 0,
+        "embedding_runs": 0,
+        "last_embedding_ms": 0.0,
+        "total_embedding_ms": 0.0,
+        "llm_calls": 0,
+        "llm_prompt_tokens": 0,
+        "llm_completion_tokens": 0,
+        "llm_total_tokens": 0,
+    }
 
     @app.middleware("http")
     async def unhandled_error_middleware(request: Request, call_next):
+        started = time.perf_counter()
         try:
-            return await call_next(request)
+            response = await call_next(request)
+
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+            metrics = request.app.state.metrics
+            metrics["total_requests"] += 1
+            metrics["total_latency_ms"] += elapsed_ms
+            path = request.url.path
+            endpoint_counts = metrics["endpoint_counts"]
+            endpoint_counts[path] = endpoint_counts.get(path, 0) + 1
+
+            logger.info(
+                f"request {request.method} {path} status={response.status_code} duration_ms={elapsed_ms}"
+            )
+            return response
         except Exception as exc:
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
+            metrics = request.app.state.metrics
+            metrics["total_requests"] += 1
+            metrics["total_latency_ms"] += elapsed_ms
+            path = request.url.path
+            endpoint_counts = metrics["endpoint_counts"]
+            endpoint_counts[path] = endpoint_counts.get(path, 0) + 1
             logger.exception(f"Unhandled API error on {request.url.path}: {exc}")
             return JSONResponse(
                 status_code=500,
@@ -71,6 +109,33 @@ def create_app() -> FastAPI:
                     "path": request.url.path,
                 },
             )
+
+    @app.get("/stats", response_model=StatsResponse)
+    def stats(request: Request):
+        metrics = request.app.state.metrics
+        total_requests = metrics.get("total_requests", 0)
+        avg_latency = (
+            round(metrics.get("total_latency_ms", 0.0) / total_requests, 2)
+            if total_requests > 0
+            else 0.0
+        )
+
+        return StatsResponse(
+            total_requests=total_requests,
+            endpoint_counts=metrics.get("endpoint_counts", {}),
+            average_latency_ms=avg_latency,
+            crawl_runs=metrics.get("crawl_runs", 0),
+            last_crawl_pages=metrics.get("last_crawl_pages", 0),
+            last_crawl_failed=metrics.get("last_crawl_failed", 0),
+            last_crawl_skipped=metrics.get("last_crawl_skipped", 0),
+            embedding_runs=metrics.get("embedding_runs", 0),
+            last_embedding_ms=metrics.get("last_embedding_ms", 0.0),
+            total_embedding_ms=metrics.get("total_embedding_ms", 0.0),
+            llm_calls=metrics.get("llm_calls", 0),
+            llm_prompt_tokens=metrics.get("llm_prompt_tokens", 0),
+            llm_completion_tokens=metrics.get("llm_completion_tokens", 0),
+            llm_total_tokens=metrics.get("llm_total_tokens", 0),
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -103,6 +168,11 @@ def create_app() -> FastAPI:
         try:
             result = crawler.crawl(str(payload.start_url))
             request.app.state.last_crawl_result = result
+            metrics = request.app.state.metrics
+            metrics["crawl_runs"] += 1
+            metrics["last_crawl_pages"] = result.total_pages
+            metrics["last_crawl_failed"] = len(result.failed_urls)
+            metrics["last_crawl_skipped"] = len(result.skipped_urls)
             return CrawlResponse(
                 page_count=result.total_pages,
                 skipped_count=len(result.skipped_urls),
@@ -215,7 +285,16 @@ def create_app() -> FastAPI:
             )
 
         texts = [chunk.text for chunk in all_chunks]
+        embed_started = time.perf_counter()
         embeddings = embedder.embed(texts)
+        embedding_ms = round((time.perf_counter() - embed_started) * 1000, 2)
+        metrics = request.app.state.metrics
+        metrics["embedding_runs"] += 1
+        metrics["last_embedding_ms"] = embedding_ms
+        metrics["total_embedding_ms"] += embedding_ms
+        logger.info(
+            f"embedding_generation chunks={len(texts)} model={embedder.model_name} duration_ms={embedding_ms}"
+        )
         added = vectorstore.add(all_chunks, embeddings)
 
         return IndexResponse(
@@ -235,6 +314,14 @@ def create_app() -> FastAPI:
             similarity_threshold=payload.similarity_threshold,
         )
         total_ms = round((time.perf_counter() - started) * 1000, 2)
+        usage = getattr(result, "llm_usage", {}) or {}
+
+        metrics = app.state.metrics
+        if usage:
+            metrics["llm_calls"] += 1
+            metrics["llm_prompt_tokens"] += int(usage.get("prompt_tokens", 0) or 0)
+            metrics["llm_completion_tokens"] += int(usage.get("completion_tokens", 0) or 0)
+            metrics["llm_total_tokens"] += int(usage.get("total_tokens", 0) or 0)
 
         return AskResponse(
             answer=result.answer,
@@ -244,8 +331,9 @@ def create_app() -> FastAPI:
             similarity_threshold=getattr(result, "similarity_threshold", 0.0),
             sources=result.sources,
             timings={
-                "retrieval_ms": None,
-                "generation_ms": None,
+                "retrieval_ms": getattr(result, "retrieval_ms", None),
+                "generation_ms": getattr(result, "generation_ms", None),
+                "llm_usage": usage,
                 "total_ms": total_ms,
             },
         )

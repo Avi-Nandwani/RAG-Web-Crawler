@@ -60,6 +60,23 @@ class AskResponse(BaseModel):
     timings: Dict[str, Any]
 
 
+class StatsResponse(BaseModel):
+    total_requests: int
+    endpoint_counts: Dict[str, int]
+    average_latency_ms: float
+    crawl_runs: int
+    last_crawl_pages: int
+    last_crawl_failed: int
+    last_crawl_skipped: int
+    embedding_runs: int
+    last_embedding_ms: float
+    total_embedding_ms: float
+    llm_calls: int
+    llm_prompt_tokens: int
+    llm_completion_tokens: int
+    llm_total_tokens: int
+
+
 class HealthResponse(BaseModel):
     status: str
     api: str

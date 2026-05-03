@@ -22,6 +22,8 @@ This project implements a complete RAG pipeline that:
 - ✅ Confidence scoring for retrieved evidence
 - ✅ Hard refusal when retrieval confidence is below threshold
 - ✅ Relevance-centered source snippets with highlighted match spans
+- ✅ Request/response timing logs and API metrics endpoint
+- ✅ Embedding generation time tracking and LLM token usage logging
 - ✅ RESTful API with FastAPI
 - ✅ Comprehensive logging and error handling
 - ✅ Completely free and offline-capable
@@ -202,8 +204,44 @@ curl -X POST "http://localhost:8000/ask" \
   "timings": {
     "retrieval_ms": 45,
     "generation_ms": 1200,
+    "llm_usage": {
+      "prompt_tokens": 58,
+      "completion_tokens": 132,
+      "total_tokens": 190
+    },
     "total_ms": 1245
   }
+}
+```
+
+#### 4. API Stats
+
+```bash
+curl -X GET "http://localhost:8000/stats"
+```
+
+**Response:**
+```json
+{
+  "total_requests": 42,
+  "endpoint_counts": {
+    "/health": 5,
+    "/crawl": 3,
+    "/index": 3,
+    "/ask": 10
+  },
+  "average_latency_ms": 118.3,
+  "crawl_runs": 3,
+  "last_crawl_pages": 25,
+  "last_crawl_failed": 1,
+  "last_crawl_skipped": 2,
+  "embedding_runs": 3,
+  "last_embedding_ms": 734.5,
+  "total_embedding_ms": 2150.2,
+  "llm_calls": 10,
+  "llm_prompt_tokens": 580,
+  "llm_completion_tokens": 1290,
+  "llm_total_tokens": 1870
 }
 ```
 

@@ -48,6 +48,22 @@ class TestOllamaClient:
 
         assert raised is True
 
+    def test_generate_extracts_usage(self):
+        fake_client = MagicMock()
+        fake_client.chat.return_value = {
+            "message": {"content": "Answer [1]"},
+            "prompt_eval_count": 12,
+            "eval_count": 34,
+        }
+
+        client = OllamaClient(client=fake_client)
+        resp = client.generate("q")
+
+        assert resp.usage["prompt_tokens"] == 12
+        assert resp.usage["completion_tokens"] == 34
+        assert resp.usage["total_tokens"] == 46
+        assert resp.generation_ms >= 0.0
+
 
 class TestGroundedQAService:
     def _chunk(self, idx=0, score=0.8):

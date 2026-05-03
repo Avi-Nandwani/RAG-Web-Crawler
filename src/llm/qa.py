@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import time
 from typing import Any, Dict, List, Optional
 
 from src.llm.client import LLMResponse, OllamaClient
@@ -16,6 +17,9 @@ class QAResult:
     used_context_chunks: int = 0
     confidence_score: float = 0.0
     similarity_threshold: float = 0.0
+    retrieval_ms: Optional[float] = None
+    generation_ms: Optional[float] = None
+    llm_usage: Dict[str, int] = field(default_factory=dict)
     refused: bool = False
     reason: str = ""
 
@@ -61,12 +65,14 @@ class GroundedQAService:
 
         threshold = self.retriever.get_effective_threshold(similarity_threshold)
 
+        retrieval_started = time.perf_counter()
         retrieved = self.retriever.retrieve(
             query=question,
             top_k=top_k,
             similarity_threshold=threshold,
             enforce_threshold=False,
         )
+        retrieval_ms = round((time.perf_counter() - retrieval_started) * 1000, 2)
         if not retrieved:
             return QAResult(
                 answer=REFUSAL_MESSAGE,
@@ -74,6 +80,7 @@ class GroundedQAService:
                 used_context_chunks=0,
                 confidence_score=0.0,
                 similarity_threshold=threshold,
+                retrieval_ms=retrieval_ms,
                 refused=True,
                 reason="no_context",
             )
@@ -88,6 +95,7 @@ class GroundedQAService:
                 used_context_chunks=len(retrieved),
                 confidence_score=confidence,
                 similarity_threshold=threshold,
+                retrieval_ms=retrieval_ms,
                 refused=True,
                 reason="below_similarity_threshold",
             )
@@ -109,6 +117,7 @@ class GroundedQAService:
                 used_context_chunks=len(retrieved),
                 confidence_score=confidence,
                 similarity_threshold=threshold,
+                retrieval_ms=retrieval_ms,
                 refused=True,
                 reason="llm_error",
             )
@@ -120,6 +129,9 @@ class GroundedQAService:
                 used_context_chunks=len(retrieved),
                 confidence_score=confidence,
                 similarity_threshold=threshold,
+                retrieval_ms=retrieval_ms,
+                generation_ms=llm_response.generation_ms,
+                llm_usage=llm_response.usage,
                 refused=True,
                 reason="empty_llm_output",
             )
@@ -133,6 +145,9 @@ class GroundedQAService:
             used_context_chunks=len(retrieved),
             confidence_score=confidence,
             similarity_threshold=threshold,
+            retrieval_ms=retrieval_ms,
+            generation_ms=llm_response.generation_ms,
+            llm_usage=llm_response.usage,
             refused=False,
             reason="",
         )

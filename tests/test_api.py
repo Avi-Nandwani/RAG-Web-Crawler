@@ -112,6 +112,20 @@ class TestAPI:
         assert body["status"] == "ok"
         assert body["vector_count"] == 0
 
+    def test_stats_endpoint(self):
+        # Trigger one request so middleware metrics are non-empty.
+        self.client.get("/health")
+
+        resp = self.client.get("/stats")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total_requests"] >= 1
+        assert "/health" in body["endpoint_counts"]
+        assert "average_latency_ms" in body
+        assert "crawl_runs" in body
+        assert "llm_total_tokens" in body
+
     def test_crawl_endpoint(self):
         crawler = DummyCrawler(result=make_crawl_result())
         self.app.dependency_overrides[get_crawler] = lambda: crawler
@@ -235,6 +249,29 @@ class TestAPI:
         body = resp.json()
         assert body["refused"] is True
         assert body["reason"] == "no_context"
+
+    def test_ask_includes_week11_timings_and_usage(self):
+        qa_result = QAResult(
+            answer="RAG uses retrieval plus generation [1].",
+            sources=[{"url": "https://example.com/rag"}],
+            used_context_chunks=1,
+            confidence_score=0.88,
+            similarity_threshold=0.3,
+            retrieval_ms=15.25,
+            generation_ms=222.5,
+            llm_usage={"prompt_tokens": 10, "completion_tokens": 24, "total_tokens": 34},
+            refused=False,
+            reason="",
+        )
+        self.app.dependency_overrides[get_qa_service] = lambda: DummyQAService(result=qa_result)
+
+        resp = self.client.post("/ask", json={"question": "What is RAG?"})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["timings"]["retrieval_ms"] == 15.25
+        assert body["timings"]["generation_ms"] == 222.5
+        assert body["timings"]["llm_usage"]["total_tokens"] == 34
 
     def test_validation_error_shape(self):
         resp = self.client.post("/ask", json={"question": ""})

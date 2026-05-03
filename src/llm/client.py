@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+import time
 from typing import Any, Dict, Optional
 
 from src.utils.config import config
@@ -13,6 +14,8 @@ class LLMResponse:
 
     text: str
     model: str
+    usage: Dict[str, int] = field(default_factory=dict)
+    generation_ms: float = 0.0
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -57,6 +60,7 @@ class OllamaClient:
         messages.append({"role": "user", "content": prompt})
 
         try:
+            started = time.perf_counter()
             response = client.chat(
                 model=self.model_name,
                 messages=messages,
@@ -65,6 +69,7 @@ class OllamaClient:
                     "num_predict": self.max_tokens,
                 },
             )
+            elapsed_ms = round((time.perf_counter() - started) * 1000, 2)
         except Exception as exc:
             logger.error(f"Ollama generation failed: {exc}")
             raise RuntimeError(f"Ollama generation failed: {exc}") from exc
@@ -75,9 +80,18 @@ class OllamaClient:
             else ""
         )
 
+        usage = self._extract_usage(response)
+        logger.info(
+            f"LLM usage model={self.model_name} prompt_tokens={usage['prompt_tokens']} "
+            f"completion_tokens={usage['completion_tokens']} total_tokens={usage['total_tokens']} "
+            f"generation_ms={elapsed_ms}"
+        )
+
         return LLMResponse(
             text=text.strip(),
             model=self.model_name,
+            usage=usage,
+            generation_ms=elapsed_ms,
             raw=response if isinstance(response, dict) else {},
         )
 
@@ -94,3 +108,16 @@ class OllamaClient:
         # ollama.Client(host=...) is supported in the installed SDK.
         self._client = ollama.Client(host=self.base_url)
         return self._client
+
+    def _extract_usage(self, response: Any) -> Dict[str, int]:
+        if not isinstance(response, dict):
+            return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+        prompt_tokens = int(response.get("prompt_eval_count", 0) or 0)
+        completion_tokens = int(response.get("eval_count", 0) or 0)
+        total_tokens = prompt_tokens + completion_tokens
+        return {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+        }
