@@ -13,20 +13,20 @@ This project implements a complete RAG pipeline that:
 
 ## Features
 
-- ✅ Polite web crawler with configurable delays and robots.txt compliance
-- ✅ Domain-bounded crawling with page limits
-- ✅ Text extraction with boilerplate removal
-- ✅ Semantic chunking with overlap for context preservation
-- ✅ Vector-based similarity search using ChromaDB
-- ✅ Grounded question answering with source citations
-- ✅ Confidence scoring for retrieved evidence
-- ✅ Hard refusal when retrieval confidence is below threshold
-- ✅ Relevance-centered source snippets with highlighted match spans
-- ✅ Request/response timing logs and API metrics endpoint
-- ✅ Embedding generation time tracking and LLM token usage logging
-- ✅ RESTful API with FastAPI
-- ✅ Comprehensive logging and error handling
-- ✅ Completely free and offline-capable
+-  Polite web crawler with configurable delays and robots.txt compliance
+-  Domain-bounded crawling with page limits
+-  Text extraction with boilerplate removal
+-  Semantic chunking with overlap for context preservation
+-  Vector-based similarity search using ChromaDB
+-  Grounded question answering with source citations
+-  Confidence scoring for retrieved evidence
+-  Hard refusal when retrieval confidence is below threshold
+-  Relevance-centered source snippets with highlighted match spans
+-  Request/response timing logs and API metrics endpoint
+-  Embedding generation time tracking and LLM token usage logging
+-  RESTful API with FastAPI
+-  Comprehensive logging and error handling
+-  Completely free and offline-capable
 
 ## Tech Stack
 
