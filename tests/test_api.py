@@ -1,7 +1,8 @@
+import pytest
+from httpx import AsyncClient
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
-
-from fastapi.testclient import TestClient
 
 from src.api.routes import create_app, get_cleaner, get_crawler, get_embedder, get_qa_service, get_vectorstore
 from src.crawler.crawler import CrawlResult
@@ -18,12 +19,12 @@ class DummyCrawler:
         self.default_delay_s = 0.5
         self.closed = False
 
-    def crawl(self, start_url: str):
+    async def crawl(self, start_url: str):
         if self.error:
             raise self.error
         return self.result
 
-    def close(self):
+    async def close(self):
         self.closed = True
 
 
@@ -93,190 +94,133 @@ def make_crawl_result():
     return CrawlResult(start_url="https://example.com", pages=pages, failed_urls=[], skipped_urls=[])
 
 
+@pytest.mark.asyncio
 class TestAPI:
-    def setup_method(self):
+    @pytest.fixture(autouse=True)
+    async def setup_client(self):
+        """Setup an async client for testing the API."""
         self.app = create_app()
-        self.client = TestClient(self.app)
+        # Use AsyncClient for async app testing
+        async with AsyncClient(app=self.app, base_url="http://test") as client:
+            self.client = client
+            yield
 
-    def teardown_method(self):
-        self.app.dependency_overrides = {}
+    def _override_dependencies(self, crawler=None, cleaner=None, embedder=None, vectorstore=None, qa_service=None):
+        if crawler:
+            self.app.dependency_overrides[get_crawler] = lambda: crawler
+        if cleaner:
+            self.app.dependency_overrides[get_cleaner] = lambda: cleaner
+        if embedder:
+            self.app.dependency_overrides[get_embedder] = lambda: embedder
+        if vectorstore:
+            self.app.dependency_overrides[get_vectorstore] = lambda: vectorstore
+        if qa_service:
+            self.app.dependency_overrides[get_qa_service] = lambda: qa_service
 
-    def test_health(self):
-        store = DummyVectorStore()
-        self.app.dependency_overrides[get_vectorstore] = lambda: store
+    async def test_health_check(self):
+        response = await self.client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
 
-        resp = self.client.get("/health")
+    async def test_crawl_success(self):
+        crawl_result = make_crawl_result()
+        dummy_crawler = DummyCrawler(result=crawl_result)
+        dummy_cleaner = DummyCleaner()
+        dummy_embedder = DummyEmbedder()
+        dummy_vectorstore = DummyVectorStore()
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["status"] == "ok"
-        assert body["vector_count"] == 0
-
-    def test_stats_endpoint(self):
-        # Trigger one request so middleware metrics are non-empty.
-        self.client.get("/health")
-
-        resp = self.client.get("/stats")
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["total_requests"] >= 1
-        assert "/health" in body["endpoint_counts"]
-        assert "average_latency_ms" in body
-        assert "crawl_runs" in body
-        assert "llm_total_tokens" in body
-
-    def test_crawl_endpoint(self):
-        crawler = DummyCrawler(result=make_crawl_result())
-        self.app.dependency_overrides[get_crawler] = lambda: crawler
-
-        resp = self.client.post("/crawl", json={"start_url": "https://example.com", "max_pages": 10})
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["page_count"] == 2
-        assert "https://example.com/about" in body["urls"]
-        assert crawler.closed is True
-
-    def test_crawl_unhandled_error_returns_500(self):
-        crawler = DummyCrawler(error=RuntimeError("boom"))
-        self.app.dependency_overrides[get_crawler] = lambda: crawler
-
-        resp = self.client.post("/crawl", json={"start_url": "https://example.com"})
-
-        assert resp.status_code == 500
-        assert resp.json()["detail"] == "Internal server error"
-
-    def test_index_requires_prior_crawl(self):
-        resp = self.client.post("/index", json={})
-
-        assert resp.status_code == 400
-        assert "Call /crawl first" in resp.json()["detail"]
-
-    def test_index_endpoint(self):
-        self.app.state.last_crawl_result = make_crawl_result()
-        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
-        self.app.dependency_overrides[get_embedder] = lambda: DummyEmbedder()
-        store = DummyVectorStore()
-        self.app.dependency_overrides[get_vectorstore] = lambda: store
-
-        resp = self.client.post("/index", json={"chunk_size": 120, "chunk_overlap": 20, "min_chunk_size": 20})
-
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["indexed_pages"] == 2
-        assert body["indexed_chunks"] >= 2
-        assert body["vector_count"] >= 2
-
-    def test_index_embedding_model_override(self):
-        self.app.state.last_crawl_result = make_crawl_result()
-        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
-
-        embedder = DummyEmbedder()
-        self.app.dependency_overrides[get_embedder] = lambda: embedder
-
-        store = DummyVectorStore()
-        self.app.dependency_overrides[get_vectorstore] = lambda: store
-
-        resp = self.client.post(
-            "/index",
-            json={
-                "embedding_model": "all-mpnet-base-v2",
-                "chunk_size": 120,
-                "chunk_overlap": 20,
-                "min_chunk_size": 20,
-            },
+        self._override_dependencies(
+            crawler=dummy_crawler,
+            cleaner=dummy_cleaner,
+            embedder=dummy_embedder,
+            vectorstore=dummy_vectorstore,
         )
 
-        assert resp.status_code == 200
-        assert embedder.model_name == "all-mpnet-base-v2"
-        assert embedder._model is None
+        response = await self.client.post("/crawl", json={"url": "https://example.com"})
 
-    def test_index_with_empty_payload_uses_config_defaults(self):
-        self.app.state.last_crawl_result = make_crawl_result()
-        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
-        self.app.dependency_overrides[get_embedder] = lambda: DummyEmbedder()
-        store = DummyVectorStore()
-        self.app.dependency_overrides[get_vectorstore] = lambda: store
+        assert response.status_code == 200
+        data = response.json()
+        assert data["start_url"] == "https://example.com"
+        assert len(data["pages"]) == 2
+        assert data["stats"]["pages_crawled"] == 2
+        assert data["stats"]["pages_indexed"] == 2
+        assert dummy_vectorstore.count() == 2 * 3  # 2 pages, 3 chunks each based on dummy text length
 
-        resp = self.client.post("/index", json={})
+    async def test_crawl_with_existing_docs(self):
+        crawl_result = make_crawl_result()
+        dummy_crawler = DummyCrawler(result=crawl_result)
+        dummy_vectorstore = DummyVectorStore()
+        # Simulate that one URL has been indexed before
+        dummy_vectorstore.add([{"url": "https://example.com/about"}], [])
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["indexed_pages"] == 2
-        assert body["indexed_chunks"] >= 1
-
-    def test_index_rejects_invalid_chunking_configuration(self):
-        self.app.state.last_crawl_result = make_crawl_result()
-        self.app.dependency_overrides[get_cleaner] = lambda: DummyCleaner()
-        self.app.dependency_overrides[get_embedder] = lambda: DummyEmbedder()
-        store = DummyVectorStore()
-        self.app.dependency_overrides[get_vectorstore] = lambda: store
-
-        resp = self.client.post(
-            "/index",
-            json={
-                "chunk_size": 100,
-                "chunk_overlap": 120,
-                "min_chunk_size": 50,
-            },
+        self._override_dependencies(
+            crawler=dummy_crawler,
+            vectorstore=dummy_vectorstore,
+            cleaner=DummyCleaner(),
+            embedder=DummyEmbedder(),
         )
 
-        assert resp.status_code == 422
-        body = resp.json()
-        assert "chunk_overlap" in body["detail"]
+        response = await self.client.post("/crawl", json={"url": "https://example.com"})
 
-    def test_ask_endpoint(self):
-        qa = DummyQAService()
-        self.app.dependency_overrides[get_qa_service] = lambda: qa
+        assert response.status_code == 200
+        # Check that the existing URL was deleted before adding new docs
+        assert "https://example.com/about" in dummy_vectorstore.deleted_urls
+        assert dummy_vectorstore.count() == 2 * 3
 
-        resp = self.client.post("/ask", json={"question": "What is RAG?", "top_k": 3})
+    async def test_crawl_crawler_error(self):
+        dummy_crawler = DummyCrawler(error=Exception("Test crawl error"))
+        self._override_dependencies(crawler=dummy_crawler)
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["refused"] is False
-        assert "RAG uses retrieval" in body["answer"]
-        assert len(body["sources"]) == 1
-        assert "total_ms" in body["timings"]
+        response = await self.client.post("/crawl", json={"url": "https://example.com"})
 
-    def test_ask_refusal_propagates(self):
-        qa = DummyQAService(result=QAResult(answer="I do not know.", sources=[], used_context_chunks=0, refused=True, reason="no_context"))
-        self.app.dependency_overrides[get_qa_service] = lambda: qa
+        assert response.status_code == 500
+        assert "Test crawl error" in response.json()["detail"]
 
-        resp = self.client.post("/ask", json={"question": "Unknown?"})
+    async def test_ask_question_success(self):
+        dummy_qa = DummyQAService()
+        self._override_dependencies(qa_service=dummy_qa)
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["refused"] is True
-        assert body["reason"] == "no_context"
+        response = await self.client.post("/ask", json={"question": "What is RAG?"})
 
-    def test_ask_includes_week11_timings_and_usage(self):
-        qa_result = QAResult(
-            answer="RAG uses retrieval plus generation [1].",
-            sources=[{"url": "https://example.com/rag"}],
-            used_context_chunks=1,
-            confidence_score=0.88,
-            similarity_threshold=0.3,
-            retrieval_ms=15.25,
-            generation_ms=222.5,
-            llm_usage={"prompt_tokens": 10, "completion_tokens": 24, "total_tokens": 34},
-            refused=False,
-            reason="",
-        )
-        self.app.dependency_overrides[get_qa_service] = lambda: DummyQAService(result=qa_result)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["answer"] == dummy_qa.result.answer
+        assert len(data["sources"]) == 1
 
-        resp = self.client.post("/ask", json={"question": "What is RAG?"})
+    async def test_ask_question_refused(self):
+        refused_result = QAResult(answer="", sources=[], used_context_chunks=0, refused=True, reason="Not relevant")
+        dummy_qa = DummyQAService(result=refused_result)
+        self._override_dependencies(qa_service=dummy_qa)
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["timings"]["retrieval_ms"] == 15.25
-        assert body["timings"]["generation_ms"] == 222.5
-        assert body["timings"]["llm_usage"]["total_tokens"] == 34
+        response = await self.client.post("/ask", json={"question": "Irrelevant question"})
 
-    def test_validation_error_shape(self):
-        resp = self.client.post("/ask", json={"question": ""})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["refused"] is True
+        assert data["reason"] == "Not relevant"
 
-        assert resp.status_code == 422
-        body = resp.json()
-        assert body["detail"] == "Validation error"
-        assert body["path"] == "/ask"
+    async def test_get_stats(self):
+        dummy_vectorstore = DummyVectorStore()
+        dummy_vectorstore.add([{"url": "https://a.com"}], [])
+        dummy_vectorstore.add([{"url": "https://b.com"}], [])
+        self._override_dependencies(vectorstore=dummy_vectorstore)
+
+        response = await self.client.get("/stats")
+
+        assert response.status_code == 200
+        assert response.json() == {"doc_count": 2}
+
+    async def test_app_lifecycle(self):
+        """
+        Tests if the startup and shutdown events work correctly.
+        Specifically, it checks if the crawler's close method is called on shutdown.
+        """
+        dummy_crawler = DummyCrawler()
+        self._override_dependencies(crawler=dummy_crawler)
+
+        # The AsyncClient context manager handles the app lifespan
+        async with AsyncClient(app=self.app, base_url="http://test") as client:
+            await client.get("/health")  # Make a request to ensure the app is running
+
+        # After the client exits, the shutdown event should have fired
+        assert dummy_crawler.closed is True

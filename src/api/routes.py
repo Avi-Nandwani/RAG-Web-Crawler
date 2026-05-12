@@ -30,8 +30,8 @@ from src.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def get_crawler() -> WebCrawler:
-    return WebCrawler()
+def get_crawler(request: Request) -> WebCrawler:
+    return request.app.state.crawler
 
 
 def get_cleaner() -> TextCleaner:
@@ -56,23 +56,12 @@ def create_app() -> FastAPI:
         version="0.1.0",
         description="Week 7 API layer for crawl, index, ask, and health endpoints.",
     )
-    app.state.last_crawl_result = None
-    app.state.metrics = {
-        "total_requests": 0,
-        "endpoint_counts": {},
-        "total_latency_ms": 0.0,
-        "crawl_runs": 0,
-        "last_crawl_pages": 0,
-        "last_crawl_failed": 0,
-        "last_crawl_skipped": 0,
-        "embedding_runs": 0,
-        "last_embedding_ms": 0.0,
-        "total_embedding_ms": 0.0,
-        "llm_calls": 0,
-        "llm_prompt_tokens": 0,
-        "llm_completion_tokens": 0,
-        "llm_total_tokens": 0,
-    }
+    app.state.crawler = WebCrawler()
+
+    @app.on_event("shutdown")
+    async def shutdown_event():
+        logger.info("Closing crawler resources...")
+        await app.state.crawler.close()
 
     @app.middleware("http")
     async def unhandled_error_middleware(request: Request, call_next):
@@ -159,29 +148,33 @@ def create_app() -> FastAPI:
         )
 
     @app.post("/crawl", response_model=CrawlResponse)
-    def crawl_site(payload: CrawlRequest, request: Request, crawler: WebCrawler = Depends(get_crawler)):
-        crawler.max_pages = payload.max_pages if payload.max_pages is not None else crawler.max_pages
-        crawler.max_depth = payload.max_depth if payload.max_depth is not None else crawler.max_depth
+    async def crawl_site(
+        payload: CrawlRequest, request: Request, crawler: WebCrawler = Depends(get_crawler)
+    ):
+        crawler.max_pages = (
+            payload.max_pages if payload.max_pages is not None else crawler.max_pages
+        )
+        crawler.max_depth = (
+            payload.max_depth if payload.max_depth is not None else crawler.max_depth
+        )
         if payload.crawl_delay_ms is not None:
             crawler.default_delay_s = payload.crawl_delay_ms / 1000.0
 
-        try:
-            result = crawler.crawl(str(payload.start_url))
-            request.app.state.last_crawl_result = result
-            metrics = request.app.state.metrics
-            metrics["crawl_runs"] += 1
-            metrics["last_crawl_pages"] = result.total_pages
-            metrics["last_crawl_failed"] = len(result.failed_urls)
-            metrics["last_crawl_skipped"] = len(result.skipped_urls)
-            return CrawlResponse(
-                page_count=result.total_pages,
-                skipped_count=len(result.skipped_urls),
-                failed_count=len(result.failed_urls),
-                total_words=result.total_words,
-                urls=[page.url for page in result.pages],
-            )
-        finally:
-            crawler.close()
+        result = await crawler.crawl(str(payload.start_url))
+        request.app.state.last_crawl_result = result
+        metrics = request.app.state.metrics
+        metrics["crawl_runs"] += 1
+        metrics["last_crawl_pages"] = result.total_pages
+        metrics["last_crawl_failed"] = len(result.failed_urls)
+        metrics["last_crawl_skipped"] = len(result.skipped_urls)
+        return CrawlResponse(
+            page_count=result.total_pages,
+            skipped_count=len(result.skipped_urls),
+            failed_count=len(result.failed_urls),
+            total_words=result.total_words,
+            urls=[page.url for page in result.pages],
+            crawl_time_s=result.crawl_time_s,
+        )
 
     @app.post("/index", response_model=IndexResponse)
     def index_content(

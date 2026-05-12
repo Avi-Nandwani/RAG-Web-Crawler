@@ -15,6 +15,7 @@ class CrawlResponse(BaseModel):
     skipped_count: int
     failed_count: int
     total_words: int
+    crawl_time_s: float
     urls: List[str]
 
 

@@ -9,6 +9,7 @@ crawler:
   user_agent: "RAG-Web-Crawler/1.0 (Educational Project)"
   respect_robots_txt: true
   max_retries: 3
+  concurrency: 5
   
 # Text Processing Settings
 chunking:
