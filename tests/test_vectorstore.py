@@ -215,3 +215,39 @@ class TestVectorStore:
         store.add([chunk], self._embeddings(1))
         results = store.search(fake_embedding(), top_k=1, similarity_threshold=0.0)
         assert results[0].chunk_index == 7
+
+    def test_recovery_on_corruption(self, monkeypatch, tmp_path):
+        from src.rag import vectorstore as vs_mod
+        from src.rag.vectorstore import VectorStore
+        from src.utils.config import config
+
+        vs_cfg = dict(config._config.get("vectorstore", {}))
+        vs_cfg["persist_directory"] = str(tmp_path / "db")
+        vs_cfg["auto_recover"] = True
+        monkeypatch.setitem(config._config, "vectorstore", vs_cfg)
+
+        (tmp_path / "db").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "db" / "corrupt.marker").write_text("bad", encoding="utf-8")
+
+        class DummyCollection:
+            def count(self):
+                return 0
+
+        class DummyClient:
+            def get_or_create_collection(self, name, metadata):
+                return DummyCollection()
+
+        created = {"count": 0}
+
+        def fake_persistent_client(*args, **kwargs):
+            created["count"] += 1
+            if created["count"] == 1:
+                raise Exception("corrupt")
+            return DummyClient()
+
+        monkeypatch.setattr(vs_mod.chromadb, "PersistentClient", fake_persistent_client)
+
+        store = VectorStore()
+        assert store.count() == 0
+        backups = list(tmp_path.glob("db_corrupt_*"))
+        assert backups

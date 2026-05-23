@@ -30,10 +30,15 @@ class DummyCrawler:
         self.max_depth = 3
         self.default_delay_s = 0.5
 
-    def crawl(self, start_url: str):
+    async def crawl(
+        self,
+        start_url: str,
+        resume: bool = False,
+        checkpoint_path: str | None = None,
+    ):
         return self.result
 
-    def close(self):
+    async def close(self):
         return None
 
 

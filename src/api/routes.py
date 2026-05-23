@@ -57,6 +57,23 @@ def create_app() -> FastAPI:
         description="Week 7 API layer for crawl, index, ask, and health endpoints.",
     )
     app.state.crawler = WebCrawler()
+    app.state.metrics = {
+        "total_requests": 0,
+        "total_latency_ms": 0.0,
+        "endpoint_counts": {},
+        "crawl_runs": 0,
+        "last_crawl_pages": 0,
+        "last_crawl_failed": 0,
+        "last_crawl_skipped": 0,
+        "embedding_runs": 0,
+        "last_embedding_ms": 0.0,
+        "total_embedding_ms": 0.0,
+        "llm_calls": 0,
+        "llm_prompt_tokens": 0,
+        "llm_completion_tokens": 0,
+        "llm_total_tokens": 0,
+    }
+    app.state.last_crawl_result = None
 
     @app.on_event("shutdown")
     async def shutdown_event():
@@ -160,7 +177,10 @@ def create_app() -> FastAPI:
         if payload.crawl_delay_ms is not None:
             crawler.default_delay_s = payload.crawl_delay_ms / 1000.0
 
-        result = await crawler.crawl(str(payload.start_url))
+        result = await crawler.crawl(
+            str(payload.start_url),
+            resume=bool(payload.resume_from_checkpoint),
+        )
         request.app.state.last_crawl_result = result
         metrics = request.app.state.metrics
         metrics["crawl_runs"] += 1

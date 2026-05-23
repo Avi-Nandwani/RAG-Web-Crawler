@@ -1,5 +1,6 @@
 import pytest
-from httpx import AsyncClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
@@ -19,7 +20,12 @@ class DummyCrawler:
         self.default_delay_s = 0.5
         self.closed = False
 
-    async def crawl(self, start_url: str):
+    async def crawl(
+        self,
+        start_url: str,
+        resume: bool = False,
+        checkpoint_path: str | None = None,
+    ):
         if self.error:
             raise self.error
         return self.result
@@ -96,18 +102,22 @@ def make_crawl_result():
 
 @pytest.mark.asyncio
 class TestAPI:
-    @pytest.fixture(autouse=True)
+    @pytest_asyncio.fixture(autouse=True)
     async def setup_client(self):
         """Setup an async client for testing the API."""
         self.app = create_app()
-        # Use AsyncClient for async app testing
-        async with AsyncClient(app=self.app, base_url="http://test") as client:
+        transport = ASGITransport(
+            app=self.app,
+            raise_app_exceptions=False,
+        )
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
             self.client = client
             yield
 
     def _override_dependencies(self, crawler=None, cleaner=None, embedder=None, vectorstore=None, qa_service=None):
         if crawler:
             self.app.dependency_overrides[get_crawler] = lambda: crawler
+            self.app.state.crawler = crawler
         if cleaner:
             self.app.dependency_overrides[get_cleaner] = lambda: cleaner
         if embedder:
@@ -120,61 +130,47 @@ class TestAPI:
     async def test_health_check(self):
         response = await self.client.get("/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        data = response.json()
+        assert data["status"] == "ok"
+        assert data["api"] == "up"
+        assert "version" in data
+        assert "vector_count" in data
+        assert "model" in data
 
     async def test_crawl_success(self):
         crawl_result = make_crawl_result()
         dummy_crawler = DummyCrawler(result=crawl_result)
-        dummy_cleaner = DummyCleaner()
-        dummy_embedder = DummyEmbedder()
-        dummy_vectorstore = DummyVectorStore()
 
-        self._override_dependencies(
-            crawler=dummy_crawler,
-            cleaner=dummy_cleaner,
-            embedder=dummy_embedder,
-            vectorstore=dummy_vectorstore,
+        self._override_dependencies(crawler=dummy_crawler)
+
+        response = await self.client.post(
+            "/crawl", json={"start_url": "https://example.com"}
         )
-
-        response = await self.client.post("/crawl", json={"url": "https://example.com"})
 
         assert response.status_code == 200
         data = response.json()
-        assert data["start_url"] == "https://example.com"
-        assert len(data["pages"]) == 2
-        assert data["stats"]["pages_crawled"] == 2
-        assert data["stats"]["pages_indexed"] == 2
-        assert dummy_vectorstore.count() == 2 * 3  # 2 pages, 3 chunks each based on dummy text length
+        assert data["page_count"] == 2
+        assert data["failed_count"] == 0
+        assert data["skipped_count"] == 0
+        assert data["total_words"] == 40
+        assert len(data["urls"]) == 2
 
-    async def test_crawl_with_existing_docs(self):
-        crawl_result = make_crawl_result()
-        dummy_crawler = DummyCrawler(result=crawl_result)
-        dummy_vectorstore = DummyVectorStore()
-        # Simulate that one URL has been indexed before
-        dummy_vectorstore.add([{"url": "https://example.com/about"}], [])
+    async def test_index_requires_crawl(self):
+        response = await self.client.post("/index", json={})
 
-        self._override_dependencies(
-            crawler=dummy_crawler,
-            vectorstore=dummy_vectorstore,
-            cleaner=DummyCleaner(),
-            embedder=DummyEmbedder(),
-        )
-
-        response = await self.client.post("/crawl", json={"url": "https://example.com"})
-
-        assert response.status_code == 200
-        # Check that the existing URL was deleted before adding new docs
-        assert "https://example.com/about" in dummy_vectorstore.deleted_urls
-        assert dummy_vectorstore.count() == 2 * 3
+        assert response.status_code == 400
+        assert "No crawled pages" in response.json()["detail"]
 
     async def test_crawl_crawler_error(self):
         dummy_crawler = DummyCrawler(error=Exception("Test crawl error"))
         self._override_dependencies(crawler=dummy_crawler)
 
-        response = await self.client.post("/crawl", json={"url": "https://example.com"})
+        response = await self.client.post(
+            "/crawl", json={"start_url": "https://example.com"}
+        )
 
         assert response.status_code == 500
-        assert "Test crawl error" in response.json()["detail"]
+        assert "Test crawl error" in response.json()["error"]
 
     async def test_ask_question_success(self):
         dummy_qa = DummyQAService()
@@ -208,7 +204,11 @@ class TestAPI:
         response = await self.client.get("/stats")
 
         assert response.status_code == 200
-        assert response.json() == {"doc_count": 2}
+        data = response.json()
+        assert "total_requests" in data
+        assert "endpoint_counts" in data
+        assert "average_latency_ms" in data
+        assert "crawl_runs" in data
 
     async def test_app_lifecycle(self):
         """
@@ -218,9 +218,9 @@ class TestAPI:
         dummy_crawler = DummyCrawler()
         self._override_dependencies(crawler=dummy_crawler)
 
-        # The AsyncClient context manager handles the app lifespan
-        async with AsyncClient(app=self.app, base_url="http://test") as client:
-            await client.get("/health")  # Make a request to ensure the app is running
+        await self.app.router.startup()
+        await self.client.get("/health")  # Make a request to ensure the app is running
+        await self.app.router.shutdown()
 
-        # After the client exits, the shutdown event should have fired
+        # After shutdown, the close hook should have fired
         assert dummy_crawler.closed is True

@@ -8,6 +8,7 @@ class CrawlRequest(BaseModel):
     max_pages: Optional[int] = Field(default=None, ge=1, le=500)
     max_depth: Optional[int] = Field(default=None, ge=0, le=10)
     crawl_delay_ms: Optional[int] = Field(default=None, ge=0, le=10000)
+    resume_from_checkpoint: Optional[bool] = Field(default=False)
 
 
 class CrawlResponse(BaseModel):

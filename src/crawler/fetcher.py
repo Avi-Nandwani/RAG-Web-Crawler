@@ -19,6 +19,7 @@ class FetchResult:
     url: str
     original_url: str
     html: Optional[str] = None
+    text: Optional[str] = None
     status_code: Optional[int] = None
     content_type: str = ""
     ok: bool = False
@@ -76,7 +77,9 @@ class Fetcher:
         wait = self.BACKOFF_FACTOR
         session = await self.get_session()
 
-        for attempt in range(1, self.max_retries + 1):
+        total_attempts = self.max_retries + 1
+
+        for attempt in range(1, total_attempts + 1):
             try:
                 async with session.get(
                     url, timeout=self.timeout, allow_redirects=True
@@ -88,7 +91,7 @@ class Fetcher:
 
                     if (
                         response.status in self.RETRYABLE_CODES
-                        and attempt < self.max_retries
+                        and attempt < total_attempts
                     ):
                         logger.debug(
                             f"Retrying {url} (attempt {attempt}/{self.max_retries}) "
@@ -102,7 +105,7 @@ class Fetcher:
 
             except (ClientError, asyncio.TimeoutError) as exc:
                 last_error = str(exc)
-                if attempt < self.max_retries:
+                if attempt < total_attempts:
                     logger.debug(
                         f"Network error fetching {url} (attempt {attempt}/{self.max_retries}): {exc}"
                     )
@@ -128,26 +131,39 @@ class Fetcher:
     ) -> FetchResult:
         """Turn an aiohttp ClientResponse into a FetchResult."""
         content_type = response.headers.get("Content-Type", "")
+        content_type_lower = content_type.lower()
         final_url = str(response.url)  # After redirects
 
         if response.status == 200:
-            if "text/html" not in content_type:
+            if "text/html" in content_type_lower:
+                html = await response.text()
                 return FetchResult(
                     url=final_url,
                     original_url=original_url,
+                    html=html,
                     status_code=response.status,
                     content_type=content_type,
-                    ok=False,
-                    error=f"Non-HTML content type: {content_type}",
+                    ok=True,
                 )
-            html = await response.text()
+
+            if content_type_lower.startswith("text/"):
+                text = await response.text()
+                return FetchResult(
+                    url=final_url,
+                    original_url=original_url,
+                    text=text,
+                    status_code=response.status,
+                    content_type=content_type,
+                    ok=True,
+                )
+
             return FetchResult(
                 url=final_url,
                 original_url=original_url,
-                html=html,
                 status_code=response.status,
                 content_type=content_type,
-                ok=True,
+                ok=False,
+                error=f"Unsupported content type: {content_type}",
             )
 
         # Non-200 response

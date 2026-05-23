@@ -10,6 +10,9 @@ crawler:
   respect_robots_txt: true
   max_retries: 3
   concurrency: 5
+  checkpoint_dir: "./data/checkpoints"
+  checkpoint_every_pages: 10
+  checkpoint_every_seconds: 30
   
 # Text Processing Settings
 chunking:
@@ -28,6 +31,7 @@ vectorstore:
   collection_name: "web_documents"
   persist_directory: "./data/chroma_db"
   distance_metric: "cosine"        # cosine, l2, or ip (inner product)
+  auto_recover: true
   
 # Retrieval Settings
 retrieval:
@@ -54,6 +58,7 @@ paths:
   raw_data: "./data/raw"
   processed_data: "./data/processed"
   vector_db: "./data/chroma_db"
+  checkpoints: "./data/checkpoints"
   logs: "./logs"
   
 # Logging

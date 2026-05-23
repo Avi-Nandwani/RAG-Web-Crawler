@@ -1,4 +1,5 @@
 import asyncio
+from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 from typing import Optional
 
@@ -22,7 +23,7 @@ class RobotsCache:
     def __init__(self, user_agent: str, timeout: int = 10):
         self.user_agent = user_agent
         self.timeout = timeout
-        self._cache: dict[str, RobotFileParser] = {}
+        self._cache: dict[tuple[str, str], RobotFileParser] = {}
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def get_session(self) -> aiohttp.ClientSession:
@@ -67,6 +68,8 @@ class RobotsCache:
         """
         parser = await self._get_parser(url)
         delay = parser.crawl_delay(self.user_agent)
+        if delay is None:
+            delay = parser.crawl_delay("*")
         return float(delay) if delay is not None else None
 
     # ------------------------------------------------------------------
@@ -77,17 +80,20 @@ class RobotsCache:
         """
         Retrieve the parsed robots.txt for a URL's domain from cache or by fetching.
         """
+        parsed = urlparse(url)
+        scheme = parsed.scheme or "http"
         domain = get_domain(url)
-        if domain not in self._cache:
-            self._cache[domain] = await self._fetch_and_parse(domain)
-        return self._cache[domain]
+        key = (scheme, domain)
+        if key not in self._cache:
+            self._cache[key] = await self._fetch_and_parse(domain, scheme)
+        return self._cache[key]
 
-    async def _fetch_and_parse(self, domain: str) -> RobotFileParser:
+    async def _fetch_and_parse(self, domain: str, scheme: str) -> RobotFileParser:
         """
         Fetch and parse the robots.txt file for a given domain.
         Returns a parser that allows all access if fetching fails.
         """
-        robots_url = f"http://{domain}/robots.txt"
+        robots_url = f"{scheme}://{domain}/robots.txt"
         parser = RobotFileParser()
         parser.set_url(robots_url)
 

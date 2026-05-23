@@ -1,3 +1,6 @@
+import shutil
+import time
+from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
 
@@ -41,18 +44,69 @@ class VectorStore:
         self.collection_name: str = collection_name or vs_cfg.get("collection_name", "web_documents")
         self.persist_directory: str = persist_directory or vs_cfg.get("persist_directory", "./data/chroma_db")
 
-        self._client = chromadb.PersistentClient(
+        self._auto_recover: bool = bool(vs_cfg.get("auto_recover", True))
+        self._client = None
+        self._collection = None
+        self._init_store()
+
+    def _create_client(self):
+        return chromadb.PersistentClient(
             path=self.persist_directory,
             settings=Settings(anonymized_telemetry=False),
         )
-        self._collection = self._client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+
+    def _init_store(self):
+        try:
+            self._client = self._create_client()
+            self._collection = self._client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except Exception as exc:
+            logger.error(f"VectorStore init failed: {exc}")
+            if not self._auto_recover or not self._recover_from_corruption():
+                raise
+
         logger.info(
             f"VectorStore ready — collection='{self.collection_name}' "
             f"docs={self._collection.count()} persist='{self.persist_directory}'"
         )
+
+    def _recover_from_corruption(self) -> bool:
+        if not self._is_persistent_path():
+            logger.error("VectorStore recovery skipped (non-persistent path)")
+            return False
+
+        backup_path = self._backup_corrupt_directory()
+        try:
+            self._client = self._create_client()
+            self._collection = self._client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            if backup_path:
+                logger.warning(
+                    f"VectorStore recovered; old data backed up to '{backup_path}'"
+                )
+            else:
+                logger.warning("VectorStore recovered with a fresh store")
+            return True
+        except Exception as exc:
+            logger.error(f"VectorStore recovery failed: {exc}")
+            return False
+
+    def _is_persistent_path(self) -> bool:
+        return bool(self.persist_directory) and self.persist_directory != ":memory:"
+
+    def _backup_corrupt_directory(self) -> str | None:
+        path = Path(self.persist_directory)
+        if not path.exists():
+            return None
+
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        backup_path = path.parent / f"{path.name}_corrupt_{timestamp}"
+        shutil.move(str(path), str(backup_path))
+        return str(backup_path)
 
     # ------------------------------------------------------------------
     # Public API

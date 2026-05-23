@@ -1,9 +1,10 @@
 import asyncio
 import hashlib
+import json
 import time
 from asyncio import Queue, Semaphore
 from pathlib import Path
-from typing import List, Set
+from typing import List, Set, Optional
 from dataclasses import dataclass, field
 
 from src.crawler.robots import RobotsCache
@@ -70,23 +71,69 @@ class WebCrawler:
         self.raw_dir = Path(config.get("paths.raw_data", "./data/raw"))
         self.raw_dir.mkdir(parents=True, exist_ok=True)
 
+        self.checkpoint_dir = Path(
+            cfg.get("checkpoint_dir", config.get("paths.checkpoints", "./data/checkpoints"))
+        )
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        self.checkpoint_every_pages: int = cfg.get("checkpoint_every_pages", 10)
+        self.checkpoint_every_seconds: int = cfg.get("checkpoint_every_seconds", 30)
+        self._last_checkpoint_time = 0.0
+        self._last_checkpoint_pages = 0
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    async def crawl(self, start_url: str) -> CrawlResult:
+    async def crawl(
+        self,
+        start_url: str,
+        resume: bool = False,
+        checkpoint_path: Optional[str] = None,
+    ) -> CrawlResult:
         """
         Asynchronously crawl a website starting from start_url.
+        Set resume=True to continue from a saved checkpoint if present.
         """
         started = time.perf_counter()
         start_url = normalize_url(start_url)
+        checkpoint_file = (
+            Path(checkpoint_path) if checkpoint_path else self._checkpoint_path(start_url)
+        )
+
+        if not resume and checkpoint_file.exists():
+            try:
+                checkpoint_file.unlink()
+            except Exception as exc:
+                logger.warning(f"Could not remove stale checkpoint {checkpoint_file}: {exc}")
+
         result = CrawlResult(start_url=start_url)
         semaphore = Semaphore(self.concurrency)
 
         # BFS queue: (url, depth)
         queue: Queue = Queue()
-        queue.put_nowait((start_url, 0))
-        visited: Set[str] = {start_url}
+        visited: Set[str] = set()
+        elapsed_offset = 0.0
+
+        if resume:
+            state = await self._load_checkpoint(checkpoint_file)
+            if state:
+                result = self._checkpoint_to_result(state)
+                visited = set(state.get("visited", []))
+                for item in state.get("queue", []):
+                    if isinstance(item, list) and len(item) == 2:
+                        queue.put_nowait((item[0], int(item[1])))
+                elapsed_offset = float(state.get("elapsed_s", 0.0))
+                start_url = result.start_url
+                logger.info(f"Resuming crawl from checkpoint: {checkpoint_file}")
+            else:
+                queue.put_nowait((start_url, 0))
+                visited = {start_url}
+        else:
+            queue.put_nowait((start_url, 0))
+            visited = {start_url}
+
+        self._last_checkpoint_time = time.perf_counter()
+        self._last_checkpoint_pages = len(result.pages)
 
         logger.info(f"Starting async crawl from: {start_url}")
         logger.info(
@@ -94,28 +141,50 @@ class WebCrawler:
             f"concurrency={self.concurrency}"
         )
 
-        while not queue.empty() and len(result.pages) < self.max_pages:
-            tasks = []
-            # Create a batch of tasks up to the concurrency limit
-            for _ in range(min(queue.qsize(), self.concurrency)):
-                if queue.empty():
-                    break
-                url, depth = queue.get_nowait()
-                task = asyncio.create_task(
-                    self._process_url(url, depth, queue, visited, result, semaphore)
+        try:
+            while not queue.empty() and len(result.pages) < self.max_pages:
+                tasks = []
+                # Create a batch of tasks up to the concurrency limit
+                for _ in range(min(queue.qsize(), self.concurrency)):
+                    if queue.empty():
+                        break
+                    url, depth = queue.get_nowait()
+                    task = asyncio.create_task(
+                        self._process_url(url, depth, queue, visited, result, semaphore)
+                    )
+                    tasks.append(task)
+
+                if tasks:
+                    await asyncio.gather(*tasks)
+
+                await self._maybe_checkpoint(
+                    checkpoint_file,
+                    result,
+                    queue,
+                    visited,
+                    elapsed_offset,
+                    started,
                 )
-                tasks.append(task)
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            await self._save_checkpoint(
+                checkpoint_file,
+                result,
+                queue,
+                visited,
+                elapsed_offset,
+                started,
+            )
+            logger.warning(f"Crawl interrupted; checkpoint saved to {checkpoint_file}")
+            raise
 
-            if tasks:
-                await asyncio.gather(*tasks)
-
-        elapsed = time.perf_counter() - started
+        elapsed = elapsed_offset + (time.perf_counter() - started)
         result.crawl_time_s = round(elapsed, 2)
         logger.info(
             f"Crawl complete in {result.crawl_time_s:.2f}s — "
             f"pages={result.total_pages}, failed={len(result.failed_urls)}, "
             f"skipped={len(result.skipped_urls)}, total_words={result.total_words}"
         )
+        await self._clear_checkpoint(checkpoint_file)
         return result
 
     async def close(self):
@@ -162,11 +231,24 @@ class WebCrawler:
 
             # Use the final URL (after redirects) as canonical
             canonical_url = normalize_url(fetch_result.url)
-            parser = HTMLParser(base_domain_url=result.start_url)
-            page = parser.parse(canonical_url, fetch_result.html)
+            if fetch_result.html is None and fetch_result.text is not None:
+                text = fetch_result.text
+                page = ParsedPage(
+                    url=canonical_url,
+                    title="",
+                    text=text,
+                    links=[],
+                    word_count=len(text.split()),
+                )
+            else:
+                parser = HTMLParser(base_domain_url=result.start_url)
+                page = parser.parse(canonical_url, fetch_result.html)
+
             result.pages.append(page)
 
-            self._save_raw(canonical_url, fetch_result.html)
+            raw_content = fetch_result.html if fetch_result.html is not None else fetch_result.text
+            if raw_content is not None:
+                self._save_raw(canonical_url, raw_content)
 
             logger.info(
                 f"[{len(result.pages)}/{self.max_pages}] "
@@ -216,3 +298,127 @@ class WebCrawler:
             filepath.write_text(html, encoding="utf-8")
         except Exception as exc:
             logger.warning(f"Could not save raw HTML for {url}: {exc}")
+
+    def _checkpoint_path(self, start_url: str) -> Path:
+        url_hash = hashlib.sha1(start_url.encode()).hexdigest()[:16]
+        return self.checkpoint_dir / f"crawl_{url_hash}.json"
+
+    async def _maybe_checkpoint(
+        self,
+        checkpoint_file: Path,
+        result: CrawlResult,
+        queue: Queue,
+        visited: Set[str],
+        elapsed_offset: float,
+        started: float,
+    ):
+        if self.checkpoint_every_pages <= 0 and self.checkpoint_every_seconds <= 0:
+            return
+
+        now = time.perf_counter()
+        pages_since = len(result.pages) - self._last_checkpoint_pages
+        time_since = now - self._last_checkpoint_time
+
+        should_save = False
+        if self.checkpoint_every_pages > 0 and pages_since >= self.checkpoint_every_pages:
+            should_save = True
+        if self.checkpoint_every_seconds > 0 and time_since >= self.checkpoint_every_seconds:
+            should_save = True
+
+        if not should_save:
+            return
+
+        await self._save_checkpoint(
+            checkpoint_file,
+            result,
+            queue,
+            visited,
+            elapsed_offset,
+            started,
+        )
+        self._last_checkpoint_time = now
+        self._last_checkpoint_pages = len(result.pages)
+
+    async def _save_checkpoint(
+        self,
+        checkpoint_file: Path,
+        result: CrawlResult,
+        queue: Queue,
+        visited: Set[str],
+        elapsed_offset: float,
+        started: float,
+    ):
+        if checkpoint_file is None:
+            return
+
+        elapsed_s = elapsed_offset + (time.perf_counter() - started)
+        pending = list(getattr(queue, "_queue", []))
+
+        state = {
+            "version": 1,
+            "start_url": result.start_url,
+            "elapsed_s": round(elapsed_s, 2),
+            "saved_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "visited": sorted(visited),
+            "queue": [[item[0], item[1]] for item in pending],
+            "pages": [self._page_to_dict(page) for page in result.pages],
+            "failed_urls": list(result.failed_urls),
+            "skipped_urls": list(result.skipped_urls),
+        }
+
+        await asyncio.to_thread(self._write_checkpoint, checkpoint_file, state)
+
+    def _write_checkpoint(self, checkpoint_file: Path, state: dict):
+        checkpoint_file.write_text(
+            json.dumps(state, indent=2, ensure_ascii=True),
+            encoding="utf-8",
+        )
+
+    async def _load_checkpoint(self, checkpoint_file: Path) -> Optional[dict]:
+        if not checkpoint_file.exists():
+            return None
+
+        try:
+            raw = await asyncio.to_thread(checkpoint_file.read_text, encoding="utf-8")
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else None
+        except Exception as exc:
+            logger.warning(f"Failed to load checkpoint {checkpoint_file}: {exc}")
+            return None
+
+    async def _clear_checkpoint(self, checkpoint_file: Path):
+        if not checkpoint_file.exists():
+            return
+
+        try:
+            await asyncio.to_thread(checkpoint_file.unlink)
+        except Exception as exc:
+            logger.warning(f"Failed to remove checkpoint {checkpoint_file}: {exc}")
+
+    def _checkpoint_to_result(self, state: dict) -> CrawlResult:
+        start_url = normalize_url(state.get("start_url", ""))
+        pages = [self._page_from_dict(page) for page in state.get("pages", [])]
+        return CrawlResult(
+            start_url=start_url,
+            pages=pages,
+            failed_urls=state.get("failed_urls", []),
+            skipped_urls=state.get("skipped_urls", []),
+        )
+
+    def _page_to_dict(self, page: ParsedPage) -> dict:
+        return {
+            "url": page.url,
+            "title": page.title,
+            "text": page.text,
+            "links": list(page.links),
+            "word_count": page.word_count,
+        }
+
+    def _page_from_dict(self, data: dict) -> ParsedPage:
+        return ParsedPage(
+            url=data.get("url", ""),
+            title=data.get("title", ""),
+            text=data.get("text", ""),
+            links=data.get("links", []),
+            word_count=int(data.get("word_count", 0) or 0),
+        )

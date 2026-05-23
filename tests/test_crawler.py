@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -90,10 +90,12 @@ class TestFetcher:
     """Tests for src.crawler.fetcher.Fetcher"""
 
     @pytest_asyncio.fixture
-    def fetcher(self):
+    async def fetcher(self):
         from src.crawler.fetcher import Fetcher
 
-        return Fetcher(user_agent="TestBot/1.0", timeout=5, max_retries=2)
+        fetcher = Fetcher(user_agent="TestBot/1.0", timeout=5, max_retries=2)
+        yield fetcher
+        await fetcher.close()
 
     async def test_successful_fetch(self, fetcher):
         """fetch() returns ok=True with HTML content on 200 response."""
@@ -163,7 +165,8 @@ class TestFetcher:
             result = await fetcher.fetch(url)
             assert result.ok is True
             assert result.text == "Success"
-            assert len(m.requests) == 3  # 1 initial + 2 retries
+            total_calls = sum(len(calls) for calls in m.requests.values())
+            assert total_calls == 3  # 1 initial + 2 retries
 
     async def test_retry_limit_exceeded(self, fetcher):
         """fetch() fails after exceeding max_retries."""
@@ -173,7 +176,8 @@ class TestFetcher:
             result = await fetcher.fetch(url)
             assert result.ok is False
             assert "503" in result.error
-            assert len(m.requests) == fetcher.max_retries + 1
+            total_calls = sum(len(calls) for calls in m.requests.values())
+            assert total_calls == fetcher.max_retries + 1
 
     async def test_redirect_handling(self, fetcher):
         """fetch() should follow redirects and return content from the final URL."""
@@ -191,12 +195,10 @@ class TestFetcher:
         """close() should close the aiohttp session."""
         # We can't directly check if the session is closed, but we can check that the method is called.
         # A better test might be to see if a subsequent fetch fails, but that's complex to set up.
-        with patch.object(fetcher.session, "close", new_callable=MagicMock) as mock_close:
+        session = await fetcher.get_session()
+        with patch.object(session, "close", new_callable=AsyncMock) as mock_close:
             await fetcher.close()
-            # aiohttp sessions are closed asynchronously, so the mock might not be called immediately.
-            # For this test, we assume it's called if no exception is raised. A more robust test
-            # would involve more complexity with async mocks.
-            pass  # Test passes if close() can be awaited without error
+            mock_close.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
@@ -211,20 +213,13 @@ class TestWebCrawler:
     @pytest_asyncio.fixture
     def crawler(self):
         from src.crawler.crawler import WebCrawler
-        from src.crawler.config import CrawlerConfig
-        from src.llm.llm import LLM
 
-        config = CrawlerConfig(
-            user_agent="TestBot/1.0",
-            max_depth=2,
-            max_total_docs=10,
-            max_retries=1,
-            timeout=2,
-            concurrency=1,
-        )
-        # Mock the LLM to avoid actual model loading/calls
-        mock_llm = MagicMock(spec=LLM)
-        return WebCrawler(config=config, llm=mock_llm)
+        crawler = WebCrawler()
+        crawler.concurrency = 1
+        crawler.max_pages = 10
+        crawler.max_depth = 2
+        crawler.default_delay_s = 0
+        return crawler
 
     async def test_crawl_simple_site(self, crawler):
         """Crawl a simple site with a few pages and check results."""
@@ -240,24 +235,15 @@ class TestWebCrawler:
             m.get(page1_url, status=200, body='<html><body>Page 1 Content</body></html>', headers={"Content-Type": "text/html"})
             m.get(page2_url, status=200, body='<html><body>Page 2 Content</body></html>', headers={"Content-Type": "text/html"})
 
-            # Mock the LLM's summarize method
-            async def mock_summarize(content, url):
-                return f"Summary for {url}"
-            crawler.llm.summarize.side_effect = mock_summarize
+            result = await crawler.crawl(start_url)
 
-            results = await crawler.crawl(start_url)
-
-            assert len(results) == 3
-            urls_crawled = {r.url for r in results}
+            assert result.total_pages == 3
+            urls_crawled = {r.url for r in result.pages}
             assert urls_crawled == {start_url, page1_url, page2_url}
-
-            # Check summaries
-            for r in results:
-                assert r.summary == f"Summary for {r.url}"
 
     async def test_respects_max_depth(self, crawler):
         """Crawler should not go deeper than max_depth."""
-        crawler.config.max_depth = 1
+        crawler.max_depth = 1
         start_url = "https://example.com/start"
         depth1_url = "https://example.com/depth1"
         depth2_url = "https://example.com/depth2" # This should not be crawled
@@ -269,20 +255,16 @@ class TestWebCrawler:
             # The crawler should not even attempt to fetch depth2_url
             m.get(depth2_url, status=200, body='<html></html>', headers={"Content-Type": "text/html"})
 
-            async def mock_summarize(content, url):
-                return f"Summary for {url}"
-            crawler.llm.summarize.side_effect = mock_summarize
+            result = await crawler.crawl(start_url)
 
-            results = await crawler.crawl(start_url)
-
-            assert len(results) == 2
-            urls_crawled = {r.url for r in results}
+            assert result.total_pages == 2
+            urls_crawled = {r.url for r in result.pages}
             assert urls_crawled == {start_url, depth1_url}
             assert depth2_url not in urls_crawled
 
-    async def test_respects_max_total_docs(self, crawler):
-        """Crawler should stop after reaching max_total_docs."""
-        crawler.config.max_total_docs = 2
+    async def test_respects_max_pages(self, crawler):
+        """Crawler should stop after reaching max_pages."""
+        crawler.max_pages = 2
         start_url = "https://example.com/start"
         page1_url = "https://example.com/page1"
         page2_url = "https://example.com/page2" # This might not be crawled if concurrency is > 1
@@ -293,13 +275,9 @@ class TestWebCrawler:
             m.get(page1_url, status=200, body='<html>Page 1</html>', headers={"Content-Type": "text/html"})
             m.get(page2_url, status=200, body='<html>Page 2</html>', headers={"Content-Type": "text/html"})
 
-            async def mock_summarize(content, url):
-                return f"Summary for {url}"
-            crawler.llm.summarize.side_effect = mock_summarize
+            result = await crawler.crawl(start_url)
 
-            results = await crawler.crawl(start_url)
-
-            assert len(results) <= crawler.config.max_total_docs
+            assert result.total_pages <= crawler.max_pages
 
     async def test_respects_robots_txt(self, crawler):
         """Crawler should not fetch URLs disallowed by robots.txt."""
@@ -316,13 +294,9 @@ class TestWebCrawler:
             # This should not be called
             m.get(disallowed_url, status=200, body='<html>Disallowed</html>', headers={"Content-Type": "text/html"})
 
-            async def mock_summarize(content, url):
-                return f"Summary for {url}"
-            crawler.llm.summarize.side_effect = mock_summarize
+            result = await crawler.crawl(start_url)
 
-            results = await crawler.crawl(start_url)
-
-            urls_crawled = {r.url for r in results}
+            urls_crawled = {r.url for r in result.pages}
             assert urls_crawled == {start_url, allowed_url}
             assert disallowed_url not in urls_crawled
 
@@ -337,15 +311,11 @@ class TestWebCrawler:
             m.get(start_url, status=200, body=f'<html><a href="{link1}">1</a><a href="{link2}">2</a></html>', headers={"Content-Type": "text/html"})
             m.get("https://example.com/page", status=200, body='<html>Page</html>', headers={"Content-Type": "text/html"})
 
-            async def mock_summarize(content, url):
-                return f"Summary for {url}"
-            crawler.llm.summarize.side_effect = mock_summarize
-
-            results = await crawler.crawl(start_url)
+            result = await crawler.crawl(start_url)
 
             # Should have crawled the start page and the normalized page ONCE
-            assert len(results) == 2
-            urls_crawled = {r.url for r in results}
+            assert result.total_pages == 2
+            urls_crawled = {r.url for r in result.pages}
             assert urls_crawled == {start_url, "https://example.com/page"}
 
     async def test_handles_crawl_delay(self, crawler):
@@ -353,37 +323,24 @@ class TestWebCrawler:
         # This is hard to test directly without making the test very slow.
         # We can test that the delay is retrieved and that asyncio.sleep is called.
         start_url = "https://example.com/start"
-        robots_body = "User-agent: *\nAllow: /\nCrawl-delay: 0.1" # Use a small delay for testing
+        robots_body = "User-agent: *\nAllow: /\nCrawl-delay: 1"
 
         with aioresponses() as m:
             m.get("https://example.com/robots.txt", status=200, body=robots_body)
             m.get(start_url, status=200, body='<html></html>', headers={"Content-Type": "text/html"})
 
-            with patch("asyncio.sleep") as mock_sleep:
-                async def mock_summarize(content, url):
-                    return f"Summary for {url}"
-                crawler.llm.summarize.side_effect = mock_summarize
-
+            crawler.default_delay_s = 0.0
+            with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
                 await crawler.crawl(start_url)
 
-                # Check if sleep was called. The exact number of calls can vary with concurrency.
-                # A simple check is that it was called at least once after fetching the first page.
-                assert mock_sleep.called
-                # Check if it was called with approximately the right delay
-                # The first call to sleep will be for the crawl delay
-                mock_sleep.assert_any_call(0.1)
+                # Check if sleep was called with the crawl delay
+                mock_sleep.assert_any_call(1.0)
 
     async def test_close_cleans_up_resources(self, crawler):
-        """close() should call close on its fetcher and llm."""
-        with patch.object(crawler.fetcher, "close", new_callable=MagicMock) as mock_fetcher_close, \
-             patch.object(crawler.llm, "close", new_callable=MagicMock) as mock_llm_close:
+           """close() should call close on its fetcher and robots cache."""
+           with patch.object(crawler.fetcher, "close", new_callable=AsyncMock) as mock_fetcher_close, \
+               patch.object(crawler.robots, "close", new_callable=AsyncMock) as mock_robots_close:
+              await crawler.close()
 
-            # Make the mock methods awaitable
-            async def async_magic(): pass
-            mock_fetcher_close.return_value = async_magic()
-            mock_llm_close.return_value = async_magic()
-
-            await crawler.close()
-
-            mock_fetcher_close.assert_called_once()
-            mock_llm_close.assert_called_once()
+              mock_fetcher_close.assert_called_once()
+              mock_robots_close.assert_called_once()
