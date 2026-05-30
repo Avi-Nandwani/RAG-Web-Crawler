@@ -1,0 +1,32 @@
+[
+  {
+    "id": "example-1",
+    "question": "What is this domain used for?",
+    "expected_urls": ["https://example.com"],
+    "expected_keywords": ["example domain", "illustrative"]
+  },
+  {
+    "id": "example-2",
+    "question": "Why is this domain reserved?",
+    "expected_urls": ["https://example.com"],
+    "expected_keywords": ["examples in documents"]
+  },
+  {
+    "id": "example-3",
+    "question": "Where can I learn more about this domain?",
+    "expected_urls": ["https://example.com"],
+    "expected_keywords": ["more information", "iana.org"]
+  },
+  {
+    "id": "site-1",
+    "question": "What is the main purpose of the site?",
+    "expected_urls": [],
+    "expected_keywords": []
+  },
+  {
+    "id": "site-2",
+    "question": "What topics are covered on the about page?",
+    "expected_urls": [],
+    "expected_keywords": []
+  }
+]
