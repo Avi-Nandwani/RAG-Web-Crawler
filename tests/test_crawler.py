@@ -17,10 +17,11 @@ class TestRobotsCache:
     """Tests for src.crawler.robots.RobotsCache"""
 
     @pytest_asyncio.fixture
-    def cache(self):
+    async def cache(self):
         from src.crawler.robots import RobotsCache
-
-        return RobotsCache(user_agent="TestBot/1.0", timeout=5)
+        cache = RobotsCache(user_agent="TestBot/1.0", timeout=5)
+        yield cache
+        await cache.close()
 
     async def test_allows_when_robots_permits(self, cache):
         """can_fetch returns True when robots.txt allows the path."""
@@ -211,7 +212,7 @@ class TestWebCrawler:
     """Tests for src.crawler.crawler.WebCrawler"""
 
     @pytest_asyncio.fixture
-    def crawler(self):
+    async def crawler(self):
         from src.crawler.crawler import WebCrawler
 
         crawler = WebCrawler()
@@ -219,7 +220,8 @@ class TestWebCrawler:
         crawler.max_pages = 10
         crawler.max_depth = 2
         crawler.default_delay_s = 0
-        return crawler
+        yield crawler
+        await crawler.close()
 
     async def test_crawl_simple_site(self, crawler):
         """Crawl a simple site with a few pages and check results."""
