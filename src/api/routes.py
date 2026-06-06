@@ -6,7 +6,8 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.api.models import (
     AskRequest,
@@ -350,6 +351,20 @@ def create_app() -> FastAPI:
                 "total_ms": total_ms,
             },
         )
+
+    # Mount static files for the demo interface (Week 15)
+    from pathlib import Path
+    static_dir = Path(__file__).parent.parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+        
+        @app.get("/")
+        async def root():
+            """Serve the demo interface home page."""
+            index_file = static_dir / "index.html"
+            if index_file.exists():
+                return FileResponse(index_file, media_type="text/html")
+            return JSONResponse({"message": "Demo interface not available"})
 
     return app
 

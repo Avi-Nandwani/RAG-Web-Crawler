@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG Web Crawler</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            color: white;
+            margin-bottom: 40px;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .panel {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .panel h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #555;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        input[type="text"],
+        input[type="number"],
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 80px;
+        }
+
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 4px;
+            font-size: 1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            width: 100%;
+        }
+
+        button:hover {
+            background: #764ba2;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(118, 75, 162, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 0.9em;
+            display: none;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .status.loading {
+            background: #e3f2fd;
+            color: #1976d2;
+        }
+
+        .status.success {
+            background: #e8f5e9;
+            color: #388e3c;
+        }
+
+        .status.error {
+            background: #ffebee;
+            color: #c62828;
+        }
+
+        .results-panel {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .results-panel h2 {
+            color: #333;
+            margin-bottom: 20px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .result-item {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .result-item:last-child {
+            border-bottom: none;
+        }
+
+        .result-question {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .result-answer {
+            color: #333;
+            line-height: 1.6;
+            margin-bottom: 15px;
+        }
+
+        .result-refused {
+            color: #c62828;
+            font-style: italic;
+        }
+
+        .sources {
+            background: #f5f5f5;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+
+        .sources h4 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 0.95em;
+        }
+
+        .source {
+            margin-bottom: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 3px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .source-url {
+            font-size: 0.85em;
+            color: #667eea;
+            text-decoration: none;
+            word-break: break-all;
+        }
+
+        .source-url:hover {
+            text-decoration: underline;
+        }
+
+        .source-title {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .source-snippet {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .confidence {
+            display: inline-block;
+            background: #e8f5e9;
+            color: #388e3c;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            margin-top: 10px;
+        }
+
+        .stats {
+            background: #f5f5f5;
+            border-radius: 4px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        .stat-item {
+            padding: 10px;
+            background: white;
+            border-radius: 3px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .stat-label {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            color: #667eea;
+            font-size: 1.2em;
+        }
+
+        @media (max-width: 1024px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+
+            h1 {
+                font-size: 2em;
+            }
+        }
+
+        .empty {
+            text-align: center;
+            color: #999;
+            padding: 40px 20px;
+            font-style: italic;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(0, 0, 0, 0.1);
+            border-radius: 50%;
+            border-top-color: currentColor;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🕷️ RAG Web Crawler</h1>
+            <p class="subtitle">Crawl, index, and ask questions about web content</p>
+        </header>
+
+        <div class="layout">
+            <!-- Crawl Panel -->
+            <div class="panel">
+                <h2>1. Crawl Website</h2>
+                <div class="form-group">
+                    <label for="startUrl">Start URL</label>
+                    <input type="text" id="startUrl" placeholder="https://example.com" value="https://example.com">
+                </div>
+                <div class="form-group">
+                    <label for="maxPages">Max Pages</label>
+                    <input type="number" id="maxPages" value="10" min="1" max="100">
+                </div>
+                <div class="form-group">
+                    <label for="maxDepth">Max Depth</label>
+                    <input type="number" id="maxDepth" value="2" min="1" max="10">
+                </div>
+                <div class="form-group">
+                    <label for="crawlDelay">Crawl Delay (ms)</label>
+                    <input type="number" id="crawlDelay" value="500" min="0" max="5000">
+                </div>
+                <button onclick="crawlWebsite()">Start Crawl</button>
+                <div id="crawlStatus" class="status"></div>
+            </div>
+
+            <!-- Index Panel -->
+            <div class="panel">
+                <h2>2. Index Content</h2>
+                <div class="form-group">
+                    <label for="chunkSize">Chunk Size</label>
+                    <input type="number" id="chunkSize" value="1000" min="100" max="5000">
+                </div>
+                <div class="form-group">
+                    <label for="chunkOverlap">Chunk Overlap</label>
+                    <input type="number" id="chunkOverlap" value="200" min="0" max="1000">
+                </div>
+                <div class="form-group">
+                    <label for="minChunkSize">Min Chunk Size</label>
+                    <input type="number" id="minChunkSize" value="100" min="10" max="1000">
+                </div>
+                <button onclick="indexContent()">Index Crawled Pages</button>
+                <div id="indexStatus" class="status"></div>
+            </div>
+        </div>
+
+        <!-- Ask Panel -->
+        <div class="panel" style="margin-bottom: 30px;">
+            <h2>3. Ask Questions</h2>
+            <div class="form-group">
+                <label for="question">Question</label>
+                <textarea id="question" placeholder="What is this website about?"></textarea>
+            </div>
+            <div class="form-group">
+                <label for="topK">Top K Results</label>
+                <input type="number" id="topK" value="5" min="1" max="20">
+            </div>
+            <div class="form-group">
+                <label for="threshold">Similarity Threshold</label>
+                <input type="number" id="threshold" value="0.3" min="0" max="1" step="0.1">
+            </div>
+            <button onclick="askQuestion()">Ask Question</button>
+            <div id="askStatus" class="status"></div>
+        </div>
+
+        <!-- Results Panel -->
+        <div class="results-panel">
+            <h2>Results</h2>
+            <div id="results" class="empty">Results will appear here...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        function showStatus(elementId, message, type, showSpinner = false) {
+            const elem = document.getElementById(elementId);
+            elem.textContent = (showSpinner ? '⏳ ' : '') + message;
+            elem.className = `status show ${type}`;
+        }
+
+        function hideStatus(elementId) {
+            document.getElementById(elementId).classList.remove('show');
+        }
+
+        async function crawlWebsite() {
+            const startUrl = document.getElementById('startUrl').value.trim();
+            const maxPages = parseInt(document.getElementById('maxPages').value);
+            const maxDepth = parseInt(document.getElementById('maxDepth').value);
+            const crawlDelay = parseInt(document.getElementById('crawlDelay').value);
+
+            if (!startUrl) {
+                showStatus('crawlStatus', 'Please enter a URL', 'error');
+                return;
+            }
+
+            showStatus('crawlStatus', 'Crawling website...', 'loading', true);
+
+            try {
+                const response = await fetch(`${API_BASE}/crawl`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        start_url: startUrl,
+                        max_pages: maxPages,
+                        max_depth: maxDepth,
+                        crawl_delay_ms: crawlDelay
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Crawl failed');
+                }
+
+                const data = await response.json();
+                showStatus('crawlStatus', 
+                    `✓ Crawled ${data.page_count} pages (${data.failed_count} failed, ${data.skipped_count} skipped)`,
+                    'success');
+                
+                displayCrawlResults(data);
+            } catch (error) {
+                showStatus('crawlStatus', `✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function indexContent() {
+            const chunkSize = parseInt(document.getElementById('chunkSize').value);
+            const chunkOverlap = parseInt(document.getElementById('chunkOverlap').value);
+            const minChunkSize = parseInt(document.getElementById('minChunkSize').value);
+
+            showStatus('indexStatus', 'Indexing content...', 'loading', true);
+
+            try {
+                const response = await fetch(`${API_BASE}/index`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        chunk_size: chunkSize,
+                        chunk_overlap: chunkOverlap,
+                        min_chunk_size: minChunkSize
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Indexing failed');
+                }
+
+                const data = await response.json();
+                showStatus('indexStatus',
+                    `✓ Indexed ${data.indexed_chunks} chunks into ${data.vector_count} vectors`,
+                    'success');
+            } catch (error) {
+                showStatus('indexStatus', `✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function askQuestion() {
+            const question = document.getElementById('question').value.trim();
+            const topK = parseInt(document.getElementById('topK').value);
+            const threshold = parseFloat(document.getElementById('threshold').value);
+
+            if (!question) {
+                showStatus('askStatus', 'Please enter a question', 'error');
+                return;
+            }
+
+            showStatus('askStatus', 'Searching for answer...', 'loading', true);
+
+            try {
+                const response = await fetch(`${API_BASE}/ask`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: question,
+                        top_k: topK,
+                        similarity_threshold: threshold
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Question failed');
+                }
+
+                const data = await response.json();
+                showStatus('askStatus', '✓ Answer generated', 'success');
+                displayAnswer(question, data);
+            } catch (error) {
+                showStatus('askStatus', `✗ Error: ${error.message}`, 'error');
+            }
+        }
+
+        function displayCrawlResults(data) {
+            let html = `
+                <div class="result-item">
+                    <div class="result-question">Crawl Results</div>
+                    <div class="stats">
+                        <div class="stats-row">
+                            <div class="stat-item">
+                                <div class="stat-label">Pages Crawled</div>
+                                <div class="stat-value">${data.page_count}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Failed URLs</div>
+                                <div class="stat-value">${data.failed_count}</div>
+                            </div>
+                        </div>
+                        <div class="stats-row">
+                            <div class="stat-item">
+                                <div class="stat-label">Skipped URLs</div>
+                                <div class="stat-value">${data.skipped_count}</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">Total Words</div>
+                                <div class="stat-value">${data.total_words}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('results').innerHTML = html;
+        }
+
+        function displayAnswer(question, result) {
+            let html = `
+                <div class="result-item">
+                    <div class="result-question">Q: ${escapeHtml(question)}</div>
+                    <div class="result-answer ${result.refused ? 'result-refused' : ''}">
+                        ${escapeHtml(result.answer)}
+                    </div>
+            `;
+
+            if (result.confidence_score !== undefined) {
+                html += `<div class="confidence">Confidence: ${(result.confidence_score * 100).toFixed(0)}%</div>`;
+            }
+
+            if (result.sources && result.sources.length > 0) {
+                html += '<div class="sources"><h4>📚 Sources</h4>';
+                result.sources.forEach((source, idx) => {
+                    html += `
+                        <div class="source">
+                            <div class="source-title">${idx + 1}. ${escapeHtml(source.title || 'Untitled')}</div>
+                            <a href="${escapeHtml(source.url)}" target="_blank" class="source-url">${escapeHtml(source.url)}</a>
+                            <div class="source-snippet">${escapeHtml((source.highlighted_snippet || source.exact_snippet || '').substring(0, 200))}</div>
+                            <div class="confidence">Score: ${(source.similarity_score * 100).toFixed(0)}%</div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+
+            html += '</div>';
+            document.getElementById('results').innerHTML = html;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Display health status on page load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                if (response.ok) {
+                    console.log('✓ API is healthy');
+                }
+            } catch (error) {
+                console.error('⚠️ Could not connect to API:', error);
+            }
+        });
+    </script>
+</body>
+</html>
